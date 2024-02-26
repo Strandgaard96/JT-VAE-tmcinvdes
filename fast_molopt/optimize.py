@@ -101,20 +101,28 @@ for batch in loader:
     # Extract smiles
     smiles = batch[0][0].smiles
 
-    props = batch[1].numpy().squeeze()
-
-    results["props"].append(props)
+    p = batch[1].clone().detach().cpu().numpy().squeeze()
+    results["props"].append(p)
     results["smiles"].append(smiles)
 
+    # z_tree_vecs, z_mol_vecs = model.encode_from_smiles([smiles], prop_batch = [0.12697000000000003,0.3016386189305794])
+    # new_smiles1 = model.decode(z_tree_vecs, z_mol_vecs, prob_decode=False)
+    # z_tree_vecs, z_mol_vecs = model.encode_from_smiles([smiles], prop_batch = [0.127,0.301])
+    # tree_vec, x_tree_mess, mol_vec = self.encode(x_jtenc_holder, x_mpn_holder)
+    # new_smiles = model.decode(z_tree_vecs, z_mol_vecs, prob_decode=False)
     mol = Chem.MolFromSmiles(smiles)
+    new_smiles = model.sample_prior(prob_decode=False)
+    # new_smiles = model.sample_prior_conditional(prompt_condition=[0.126,0.3],prob_decode=False)
 
+    # new_smiles, sim = model.conditional_optimization(
+    #     batch, sim_cutoff=sim_cutoff, lr=opts.lr, num_iter=200, type="first"
+    # )
     new_smiles, sim = model.optimize(
         batch, sim_cutoff=sim_cutoff, lr=opts.lr, num_iter=200, type="first"
     )
-
+    print(new_smiles)
     new_mol = Chem.MolFromSmiles(new_smiles)
     results["new_smiles"].append(new_smiles)
-    results["sim"].append(sim)
 
 df = pd.DataFrame(data=results)
 df.to_csv(output_dir / "optimize_results.csv", index=False)

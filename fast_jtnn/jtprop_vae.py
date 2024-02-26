@@ -56,11 +56,26 @@ class JTpropVAE(nn.Module):
         mol_vecs = self.mpn(*mpn_holder)
         return tree_vecs, tree_mess, mol_vecs
 
-    def encode_from_smiles(self, smiles_list):
+    def encode_from_smiles(self, smiles_list, prop_batch):
         tree_batch = [MolTree(s) for s in smiles_list]
-        _, jtenc_holder, mpn_holder = tensorize_prop(tree_batch, self.vocab, assm=False)
-        tree_vecs, _, mol_vecs = self.encode(jtenc_holder, mpn_holder)
-        return torch.cat([tree_vecs, mol_vecs], dim=-1)
+        _, _, jtenc_holder, mpn_holder = tensorize_prop(
+            tree_batch, prop_batch, self.vocab, assm=False
+        )
+        # tree_vecs, _, mol_vecs = self.encode(jtenc_holder, mpn_holder)
+
+        z_tree, z_mol, z_var = self.encode_latent(jtenc_holder, mpn_holder)
+
+        # z_tree_vecs, tree_kl = self.rsample(tree_vecs, self.T_mean, self.T_var)
+        # z_mol_vecs, mol_kl = self.rsample(mol_vecs, self.G_mean, self.G_var)
+        prop_t = torch.tensor(prop_batch, dtype=torch.float32, device="cuda").unsqueeze(
+            dim=0
+        )
+
+        z_tree_vecs = torch.cat((z_tree, prop_t), dim=1)
+        z_mol_vecs = torch.cat((z_mol, prop_t), dim=1)
+
+        return z_tree_vecs, z_mol_vecs
+        # return torch.cat([tree_vecs, mol_vecs], dim=-1)
 
     def encode_latent(self, jtenc_holder, mpn_holder):
         tree_vecs, _ = self.jtnn(*jtenc_holder)
@@ -69,9 +84,7 @@ class JTpropVAE(nn.Module):
         mol_mean = self.G_mean(mol_vecs)
         tree_var = -torch.abs(self.T_var(tree_vecs))
         mol_var = -torch.abs(self.G_var(mol_vecs))
-        return torch.cat([tree_mean, mol_mean], dim=1), torch.cat(
-            [tree_var, mol_var], dim=1
-        )
+        return tree_mean, mol_mean, torch.cat([tree_var, mol_var], dim=1)
 
     def rsample(self, z_vecs, W_mean, W_var):
         batch_size = z_vecs.size(0)
@@ -87,9 +100,111 @@ class JTpropVAE(nn.Module):
         return z_vecs, kl_loss
 
     def sample_prior(self, prob_decode=False):
-        z_tree = torch.randn(1, self.latent_size).cuda()
-        z_mol = torch.randn(1, self.latent_size).cuda()
+        z_tree = torch.randn(1, self.latent_size + 2).cuda()
+        z_mol = torch.randn(1, self.latent_size + 2).cuda()
         return self.decode(z_tree, z_mol, prob_decode)
+
+    def sample_prior_conditional(self, prompt_condition, prob_decode=False):
+        z_tree = torch.randn(1, self.latent_size).cuda()
+        torch.randn(1, self.latent_size).cuda()
+        prop_tensor = torch.tensor(
+            prompt_condition, dtype=torch.float32, device="cuda"
+        ).unsqueeze(dim=0)
+
+        z_tree_cond = torch.cat((z_tree, prop_tensor), dim=1)
+        z_mol_cond = torch.cat((z_tree, prop_tensor), dim=1)
+        new_smiles = self.decode(z_tree_cond, z_mol_cond, prob_decode=prob_decode)
+        return new_smiles
+
+    def conditional_optimization(
+        self, x_batch, sim_cutoff, lr=2.0, num_iter=20, type="both"
+    ):
+        x_batch, x_prop, x_jtenc_holder, x_mpn_holder, x_jtmpn_holder = x_batch
+        x_tree_vecs, x_tree_mess, x_mol_vecs = self.encode(x_jtenc_holder, x_mpn_holder)
+
+        mol = Chem.MolFromSmiles(x_batch[0].smiles)
+        fp1 = AllChem.GetMorganFingerprint(mol, 2)
+
+        z_tree_mean = self.T_mean(x_tree_vecs)
+        z_mol_mean = self.G_mean(x_mol_vecs)
+
+        mean = torch.cat([z_tree_mean, z_mol_mean], dim=1)
+        cur_vec = create_var(mean.data, True)
+
+        visited = []
+        cuda0 = torch.device("cuda:0")
+        for step in range(num_iter):
+            prop_val = self.propNN(cur_vec)
+            # grad = torch.autograd.grad(prop_val, cur_vec,grad_outputs=torch.ones_like(prop_val))[0]
+            dydx3 = torch.tensor([], dtype=torch.float32, device=cuda0)
+            for i in range(2):
+                li = torch.zeros_like(prop_val)
+                li[:, i] = 1.0
+                d = torch.autograd.grad(
+                    prop_val, cur_vec, retain_graph=True, grad_outputs=li
+                )[
+                    0
+                ]  # dydx: (batch_size, input_dim)
+                dydx3 = torch.concat((dydx3, d.unsqueeze(dim=1)), dim=1)
+
+            dydx3 = dydx3.squeeze()
+
+            if type == "both":
+                cur_vec = cur_vec.data + lr * dydx3[1].data + lr * dydx3[0].data
+            elif type == "first":
+                cur_vec = cur_vec.data + lr * dydx3[0].data
+            elif type == "second":
+                cur_vec = cur_vec.data + lr * dydx3[1].data
+            else:
+                raise ValueError
+            # cur_vec = cur_vec.data + lr * grad.data
+            cur_vec.data + lr * dydx3[0].data
+            cur_vec.data + lr * dydx3[1].data
+
+            cur_vec = create_var(cur_vec, True)
+            visited.append(cur_vec)
+
+        li, r = 0, num_iter - 1
+        while li < r - 1:
+            mid = (li + r) // 2
+            new_vec = visited[mid]
+            tree_vec, mol_vec = torch.chunk(new_vec, 2, dim=1)
+            new_smiles = self.decode(tree_vec, mol_vec, prob_decode=False)
+            if new_smiles is None:
+                r = mid - 1
+                continue
+
+            new_mol = Chem.MolFromSmiles(new_smiles)
+            fp2 = AllChem.GetMorganFingerprint(new_mol, 2)
+            sim = DataStructs.TanimotoSimilarity(fp1, fp2)
+            if sim < sim_cutoff:
+                r = mid - 1
+            else:
+                li = mid
+        """
+        best_vec = visited[0]
+        for new_vec in visited:
+            tree_vec,mol_vec = torch.chunk(new_vec, 2, dim=1)
+            new_smiles = self.decode(tree_vec, mol_vec, prob_decode=False)
+            if new_smiles is None: continue
+            new_mol = Chem.MolFromSmiles(new_smiles)
+            fp2 = AllChem.GetMorganFingerprint(new_mol, 2)
+            sim = DataStructs.TanimotoSimilarity(fp1, fp2)
+            if sim >= sim_cutoff:
+                best_vec = new_vec
+        """
+        tree_vec, mol_vec = torch.chunk(visited[li], 2, dim=1)
+        # tree_vec,mol_vec = torch.chunk(best_vec, 2, dim=1)
+        new_smiles = self.decode(tree_vec, mol_vec, prob_decode=False)
+        if new_smiles is None:
+            return x_batch[0].smiles, 1.0
+        new_mol = Chem.MolFromSmiles(new_smiles)
+        fp2 = AllChem.GetMorganFingerprint(new_mol, 2)
+        sim = DataStructs.TanimotoSimilarity(fp1, fp2)
+        if sim >= sim_cutoff:
+            return new_smiles, sim
+        else:
+            return x_batch[0].smiles, 1.0
 
     def optimize(self, x_batch, sim_cutoff, lr=2.0, num_iter=20, type="both"):
         x_batch, x_prop, x_jtenc_holder, x_mpn_holder, x_jtmpn_holder = x_batch
