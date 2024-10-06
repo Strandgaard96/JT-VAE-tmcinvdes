@@ -6,6 +6,8 @@ import sys
 import time
 from pathlib import Path
 
+from fast_jtnn.datautils_prop import MolTreeHolder_prop
+
 sys.path.append("../")
 
 import subprocess
@@ -112,6 +114,8 @@ def main_vae_train(
         )
 
     total_step = args.load_epoch
+
+    loader = MolTreeHolder_prop
 
     for epoch in tqdm(list(range(args.epoch)), position=0, leave=True):
         loader = MolTreeFolder_prop(

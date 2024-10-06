@@ -1,11 +1,10 @@
+import argparse
 import sys
-from tkinter.scrolledtext import example
 
 sys.path.append("../")
 import os
 import sys
 from multiprocessing import Pool
-from optparse import OptionParser
 from pathlib import Path
 
 import numpy as np
@@ -19,7 +18,7 @@ from fast_jtnn import *
 from fast_jtnn.datautils_prop import *
 
 
-def tensorize(smiles, assm=True):
+def create_mol_tree(smiles, assm=True):
     mol_tree = MolTree(smiles)
     mol_tree.recover()
     if assm:
@@ -35,40 +34,25 @@ def tensorize(smiles, assm=True):
     return mol_tree
 
 
-def convert(train_path, prop_path, pool, num_splits, output_path):
-    out_path = os.path.join(output_path, "./")
-    if os.path.isdir(out_path) is False:
-        os.makedirs(out_path)
+def load_smiles_and_props_from_files(train_path, prop_path):
+    """Loads smiles and properties.
 
+    Args:
+        train_path (Path): Path to SMILES txt file
+        prop_path (Path): Path to csv file with properties and property headers
+
+    Returns:
+        smiles,prop_data
+    """
     with open(train_path) as f:
         smiles = [line.strip("\r\n ").split()[0] for line in f]
     print("Input File read")
 
-    # Read the property file. The file should be a CSV
-    # with open(prop_path) as f:
-    #     prop_data = [line.strip("\r\n ").split(",") for line in f]
-
     prop_data = pd.read_csv(prop_path, sep=",")
-    print(f"Input property file read with the properties: {prop_data.columns}")
+    print(f"Input property file read with the properties: {list(prop_data.columns)}")
     print(
         "NB! This column ordering gives the ordering of properties in the property tensor"
     )
-
-    # Convert to float
-    # ## Start debug
-    # temp_prop = []
-    # for x in prop_data:
-    #     sub =[]
-    #     try:
-    #         assert len(x)==2
-    #         sub = [float(y) for y in x]
-    #         temp_prop.append(sub)
-    #     except Exception as e:
-    #         print(x)
-    #         print(e)
-    # prop_data = temp_prop
-    # ## End debug
-    # prop_data = [[float(y) for y in x] for x in prop_data]
 
     # Verify that the number of properties match the number of data points
     if len(smiles) != len(prop_data):
@@ -76,42 +60,60 @@ def convert(train_path, prop_path, pool, num_splits, output_path):
             "TEMRINATED, number of lines in property file does not match number of smiles"
         )
 
-    print("Tensorizing the input data.....")
-    all_data = pool.map(tensorize, smiles)
+    return smiles, prop_data
+
+
+def process_mol_trees(train_path, prop_path, num_splits, pickle_output_path, njobs):
+    # Crate ouput dir
+    out_path = os.path.join(pickle_output_path, "./")
+    if os.path.isdir(out_path) is False:
+        os.makedirs(out_path)
+
+    smiles, prop_data = load_smiles_and_props_from_files(
+        train_path=train_path,
+        prop_path=prop_path,
+    )
+
+    print("Converting SMILES to MolTrees.....")
+    pool = Pool(njobs)
+    all_data = pool.map(create_mol_tree, smiles)
+
     all_data_split = np.array_split(all_data, num_splits)
     prop_data_split = np.array_split(prop_data.to_numpy(), num_splits)
+    print("MolTree processsing Complete")
 
-    print("Tensorizing Complete")
-
-    print("Storing tensors")
+    print("Storing mol trees in pickles")
     for split_id in tqdm(list(range(num_splits)), position=0, leave=True):
-        with open(os.path.join(output_path, "tensors-%d.pkl" % split_id), "wb") as f:
+        with open(
+            os.path.join(pickle_output_path, "tensors-%d.pkl" % split_id), "wb"
+        ) as f:
             pickle.dump((all_data_split[split_id], prop_data_split[split_id]), f)
 
     return True
 
 
-def main_preprocess(
-    train_path, prop_path, output_path, num_splits=10, njobs=os.cpu_count()
-):
-    pool = Pool(njobs)
-    convert(train_path, prop_path, pool, num_splits, output_path)
+def main_preprocess(train_path, prop_path, output_path, num_splits=10, njobs=1):
+    process_mol_trees(train_path, prop_path, num_splits, output_path, njobs)
     return True
 
 
 if __name__ == "__main__":
     lg = rdkit.RDLogger.logger()
     lg.setLevel(rdkit.RDLogger.CRITICAL)
-    parser = OptionParser()
-    parser.add_option("-t", "--train", dest="train_path")
-    parser.add_option("-p", "--prop_path", dest="prop_path")
-    parser.add_option("-n", "--split", dest="nsplits", default=10)
-    parser.add_option("-j", "--jobs", dest="njobs", default=8)
-    parser.add_option("-o", "--output", dest="output_path")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-t", "--train", dest="train_path")
+    parser.add_argument("-p", "--prop_path", dest="prop_path")
+    parser.add_argument("-n", "--split", dest="nsplits", default=10, type=int)
+    parser.add_argument("-j", "--jobs", dest="njobs", default=8, type=int)
+    parser.add_argument(
+        "-o",
+        "--output",
+        dest="output_path",
+        help="The folder to store the processed pickles",
+    )
 
-    opts, args = parser.parse_args()
-    opts.njobs = int(opts.njobs)
+    opts = parser.parse_args()
 
-    pool = Pool(opts.njobs)
-    num_splits = int(opts.nsplits)
-    convert(opts.train_path, opts.prop_path, pool, num_splits, opts.output_path)
+    process_mol_trees(
+        opts.train_path, opts.prop_path, opts.nsplits, opts.output_path, opts.njobs
+    )

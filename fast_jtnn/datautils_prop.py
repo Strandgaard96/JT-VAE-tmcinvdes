@@ -9,56 +9,79 @@ from torch.utils.data import DataLoader, Dataset
 
 from fast_jtnn.jtmpn import JTMPN
 from fast_jtnn.jtnn_enc import JTNNEncoder
-from fast_jtnn.mpn import MPN
 
 
-class PairTreeFolder(object):
+class MolTrees(Dataset):
     def __init__(
         self,
-        data_folder,
-        vocab,
-        batch_size,
-        num_workers=4,
-        shuffle=True,
-        y_assm=True,
-        replicate=None,
+        root: str,
+        targets: list[str],
+        exclude: list[str] = [],
+        developer_mode=False,
     ):
-        self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
-        self.batch_size = batch_size
-        self.vocab = vocab
-        self.num_workers = num_workers
-        self.y_assm = y_assm
-        self.shuffle = shuffle
+        """Constructor for the tmQMg dataset class.
 
-        if replicate is not None:  # expand is int
-            self.data_files = self.data_files * replicate
+        Arguments:
+            root (str): The directory path in which to store raw and processed data.
+            developer_mode (bool): If set to True will only consider 1000 first data points.
+        """
 
-    def __iter__(self):
-        for fn in self.data_files:
-            fn = os.path.join(self.data_folder, fn)
-            with open(fn, "rb") as f:
-                data = pickle.load(f)
+        # directory to get raw data from
+        self.root = root
+        self._raw_dir = root + "/raw/"
 
-            if self.shuffle:
-                random.shuffle(data)  # shuffle data before batch
+        # if developer mode is set to True will only consider first 1000 examples
+        self.developer_mode = developer_mode
 
-            batches = [
-                data[i : i + self.batch_size]
-                for i in range(0, len(data), self.batch_size)
-            ]
-            if len(batches[-1]) < self.batch_size:
-                batches.pop()
+        # if root path does not exist create folder
+        if not os.path.isdir(root):
+            os.makedirs(root, exist_ok=True)
 
-            dataset = PairTreeDataset(batches, self.vocab, self.y_assm)
-            dataloader = DataLoader(
-                dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0]
-            )  # , num_workers=self.num_workers)
+        # start super class
+        super().__init__(self.root)
 
-            for b in dataloader:
-                yield b
+        with open(self.processed_dir + self.graph_type + ".pickle", "rb") as fh:
+            self.graphs = pickle.load(fh)
 
-            del data, batches, dataset, dataloader
+    @property
+    def raw_dir(self):
+        return self._raw_dir
+
+    @property
+    def raw_file_names(self):
+        return (
+            pd.read_csv("../../data/tmQMg_properties_and_targets.csv")["id"] + ".gml"
+        ).tolist()
+
+    @property
+    def raw_paths(self):
+        if self.developer_mode:
+            return [
+                os.path.join(self.raw_dir + self._raw_sub_dir, f)
+                for f in self.raw_file_names
+            ][0:100]
+        return [
+            os.path.join(self.raw_dir + self._raw_sub_dir, f)
+            for f in self.raw_file_names
+        ]
+
+    @property
+    def processed_file_names(self):
+        return self.processed_dir + self.graph_type + ".pickle"
+
+    def download(self):
+        """Function to download raw data."""
+        for raw_url in RAW_URLS:
+            file_path = download_url(raw_url, self.raw_dir)
+            extract_zip(file_path, self.raw_dir)
+
+    def len(self):
+        """Getter for the number of processed pytorch graphs."""
+        return len(self.graphs)
+
+    def __getitem__(self, idx):
+        """Accessor for processed mol tree."""
+        return self.graphs[idx]
 
 
 class MolTreeFolder_prop(object):
@@ -103,10 +126,6 @@ class MolTreeFolder_prop(object):
                 prop_data[i : i + self.batch_size]
                 for i in range(0, len(prop_data), self.batch_size)
             ]
-            # if len(batches[-1]) < self.batch_size:
-            #     print("WARNING: Batch size does not match the splits well enough.")
-            #     batches.pop()
-            #     batches_prop.pop()
 
             dataset = MolTreeDataset_prop(
                 batches, batches_prop, self.vocab, self.assm, self.optimize
@@ -121,20 +140,63 @@ class MolTreeFolder_prop(object):
             del data, batches, dataset, dataloader
 
 
-class PairTreeDataset(Dataset):
-    def __init__(self, data, vocab, y_assm):
-        self.data = data
+class MolTreeHolder_prop(object):
+    def __init__(
+        self,
+        data_folder,
+        vocab,
+        batch_size,
+        num_workers=4,
+        shuffle=False,
+        assm=True,
+        replicate=None,
+        optimize=False,
+    ):
+        self.data_folder = data_folder
+        self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.batch_size = batch_size
         self.vocab = vocab
-        self.y_assm = y_assm
+        self.num_workers = num_workers
+        self.shuffle = shuffle
+        self.assm = assm
+        self.optimize = optimize
 
-    def __len__(self):
-        return len(self.data)
+        if replicate is not None:  # expand is int
+            self.data_files = self.data_files * replicate
 
-    def __getitem__(self, idx):
-        batch0, batch1 = list(zip(*self.data[idx]))
-        return tensorize_prop(batch0, self.vocab, assm=False), tensorize_prop(
-            batch1, self.vocab, assm=self.y_assm
-        )
+    def initialize_data():
+        return
+
+    def __iter__(self):
+        for fn in self.data_files:
+            fn = os.path.join(self.data_folder, fn)
+            with open(fn, "rb") as f:
+                data = pickle.load(f)
+
+            if self.shuffle:
+                random.shuffle(data)  # shuffle data before batch
+
+            data, prop_data = data
+            batches = [
+                data[i : i + self.batch_size]
+                for i in range(0, len(data), self.batch_size)
+            ]
+            batches_prop = [
+                prop_data[i : i + self.batch_size]
+                for i in range(0, len(prop_data), self.batch_size)
+            ]
+
+            dataset = MolTreeDataset_prop(
+                batches, batches_prop, self.vocab, self.assm, self.optimize
+            )
+            dataloader = DataLoader(
+                dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0]
+            )  # , num_workers=self.num_workers)
+
+            for b in dataloader:
+                yield b
+
+            del data, batches, dataset, dataloader
 
 
 class MolTreeDataset_prop(Dataset):
@@ -168,7 +230,7 @@ def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
     # TL debug, with https://stackoverflow.com/a/70323486 {
     # print(prop_batch)
     # print(type(prop_batch))
-    prop_batch = np.vstack(prop_batch).astype(np.float)
+    # prop_batch = np.vstack(prop_batch).astype(np.float)
     # print(prop_batch)
     # print(type(prop_batch))
     # torch.from_numpy(a)
@@ -188,8 +250,8 @@ def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
             cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
             batch_idx.extend([i] * len(node.cands))
 
-    # WARNING: THIS NEEDS TO BE COMMENTED OUT WHEN DOING LOCAL OPTIMIZATION.
-    # A NONE VALUE SHOULD BE RETURNED AS THIS IS NOT USED IN OPTIMIZATION ANYWAY
+    # WARNING: THIS WAS ADDED WHEN DOING LOCAL OPTIMIZATION.
+    # the holder throws an error when doing local optimization.
     if optimize:
         jtmpn_holder = None
     else:
