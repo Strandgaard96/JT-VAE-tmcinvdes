@@ -14,8 +14,11 @@ from tqdm import tqdm
 
 source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, str(source))
-from fast_jtnn import *
 from fast_jtnn.datautils_prop import *
+from fast_jtnn.mol_tree import MolTree
+
+lg = rdkit.RDLogger.logger()
+lg.setLevel(rdkit.RDLogger.CRITICAL)
 
 
 def create_mol_tree(smiles, assm=True):
@@ -60,36 +63,27 @@ def load_smiles_and_props_from_files(train_path, prop_path):
             "TEMRINATED, number of lines in property file does not match number of smiles"
         )
 
-    return smiles, prop_data
+    return smiles, prop_data.to_numpy()
 
 
-def process_mol_trees(train_path, prop_path, num_splits, pickle_output_path, njobs):
-    # Crate ouput dir
-    out_path = os.path.join(pickle_output_path, "./")
-    if os.path.isdir(out_path) is False:
-        os.makedirs(out_path)
-
+def process_mol_trees(train_path, prop_path, njobs, developer_mode):
     smiles, prop_data = load_smiles_and_props_from_files(
         train_path=train_path,
         prop_path=prop_path,
     )
+    if developer_mode:
+        smiles = smiles[:100]
+        prop_data = prop_data[:100]
 
     print("Converting SMILES to MolTrees.....")
     pool = Pool(njobs)
     all_data = pool.map(create_mol_tree, smiles)
 
-    all_data_split = np.array_split(all_data, num_splits)
-    prop_data_split = np.array_split(prop_data.to_numpy(), num_splits)
+    # all_data_split = np.array_split(all_data, num_splits)
+    # prop_data_split = np.array_split(prop_data.to_numpy(), num_splits)
     print("MolTree processsing Complete")
 
-    print("Storing mol trees in pickles")
-    for split_id in tqdm(list(range(num_splits)), position=0, leave=True):
-        with open(
-            os.path.join(pickle_output_path, "tensors-%d.pkl" % split_id), "wb"
-        ) as f:
-            pickle.dump((all_data_split[split_id], prop_data_split[split_id]), f)
-
-    return True
+    return all_data, prop_data
 
 
 def main_preprocess(train_path, prop_path, output_path, num_splits=10, njobs=1):

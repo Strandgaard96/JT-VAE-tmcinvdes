@@ -109,6 +109,7 @@ class MPN(nn.Module):
 
     @staticmethod
     def tensorize(mol_batch):
+        mol_batch = [mol_batch]
         padding = torch.zeros(ATOM_FDIM + BOND_FDIM)
         fatoms, fbonds = [], [padding]  # Ensure bond is 1-indexed
         in_bonds, all_bonds = [], [(-1, -1)]  # Ensure bond is 1-indexed

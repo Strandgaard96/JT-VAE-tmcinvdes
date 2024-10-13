@@ -6,7 +6,9 @@ import sys
 import time
 from pathlib import Path
 
-from fast_jtnn.datautils_prop import MolTreeHolder_prop
+from preprocess_prop import process_mol_trees
+
+from fast_jtnn.datautils_prop import MolTreeDataset
 
 sys.path.append("../")
 
@@ -17,6 +19,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -41,7 +44,7 @@ def main_vae_train(
     args,
 ):
     #  Load the vocab
-    with open(args.vocab) as f:
+    with open(args.vocab_path) as f:
         vocab = f.read().splitlines()
     # vocab = [x.strip("\r\n ") for x in open(args.vocab)]
     vocab = Vocab(vocab)
@@ -115,12 +118,18 @@ def main_vae_train(
 
     total_step = args.load_epoch
 
-    loader = MolTreeHolder_prop
+    dataset = MolTreeDataset(
+        train_path=args.dataset_path,
+        prop_path=args.dataset_prop,
+        vocab_path=args.vocab_path,
+        developer_mode=args.developer_mode,
+    )
+
+    loader = DataLoader(
+        dataset, batch_size=10, shuffle=False, collate_fn=lambda x: x[0]
+    )
 
     for epoch in tqdm(list(range(args.epoch)), position=0, leave=True):
-        loader = MolTreeFolder_prop(
-            args.train, vocab, args.batch_size, shuffle=False
-        )  # , num_workers=4)
         for batch in loader:
             total_step += 1
             model.zero_grad()
@@ -159,10 +168,12 @@ def main_vae_train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train", required=True)
-    parser.add_argument("--vocab", required=True)
+    parser.add_argument("--dataset_path", required=True, type=Path)
+    parser.add_argument("--dataset_prop", required=True, type=Path)
+    parser.add_argument("--vocab_path", required=True)
     parser.add_argument("--save_dir", required=True, type=Path)
     parser.add_argument("--load_previous_model", action="store_true")
+    parser.add_argument("--developer_mode", action="store_true")
     parser.add_argument("--model_path", required=False, type=Path)
     parser.add_argument("--load_epoch", type=int, default=0)
     parser.add_argument(
@@ -175,7 +186,7 @@ if __name__ == "__main__":
 
     # These should not be touched
     parser.add_argument("--hidden_size", type=int, default=450)
-    parser.add_argument("--batch_size", type=int, default=32)  # 2 when debugging)
+    parser.add_argument("--batch_size", type=int, default=2)  # 2 when debugging)
     parser.add_argument("--latent_size", type=int, default=56)
     parser.add_argument("--depthT", type=int, default=20)
     parser.add_argument("--depthG", type=int, default=3)

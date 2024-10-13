@@ -45,9 +45,9 @@ class JTNNEncoder(nn.Module):
     def tensorize(tree_batch):
         node_batch = []
         scope = []
-        for tree in tree_batch:
-            scope.append((len(node_batch), len(tree.nodes)))
-            node_batch.extend(tree.nodes)
+        # for tree in tree_batch:
+        scope.append((len(node_batch), len(tree_batch.nodes)))
+        node_batch.extend(tree_batch.nodes)
 
         return JTNNEncoder.tensorize_nodes(node_batch, scope)
 
