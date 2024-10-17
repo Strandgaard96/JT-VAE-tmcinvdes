@@ -21,6 +21,7 @@ def load_model(vocab, model_path, hidden_size=450, latent_size=56, depthT=20, de
         int(latent_size),
         int(opts.depthT),
         int(opts.depthG),
+        train_mode=["denticity"],
     )
     dict_buffer = torch.load(model_path)
     model.load_state_dict(dict_buffer)
@@ -50,12 +51,13 @@ def main_sample(
         int(latent_size),
         int(depthT),
         int(depthG),
+        train_mode=["denticity"],
     )
     dict_buffer = torch.load(model_path)
     model.load_state_dict(dict_buffer)
     model = model.cuda()
 
-    torch.manual_seed(0)
+    torch.manual_seed(2)
     with open(output_file, "w") as out_file:
         for i in range(nsample):
             if i % 10 == 0:

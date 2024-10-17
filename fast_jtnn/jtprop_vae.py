@@ -1,4 +1,5 @@
 import copy
+import sys
 from collections import defaultdict
 
 import rdkit.Chem as Chem
@@ -79,13 +80,14 @@ class JTpropVAE(nn.Module):
                 self.denticityNN_loss = nn.BCEWithLogitsLoss()
                 print("Added denticity layer")
             elif term == "isomer":
-                # Multiclass classification (0 for monodentate and 1/2 for cis/trans)
+                # Binary classification (0 for cis and 1 for trans)
                 self.isomerNN = nn.Sequential(
                     nn.Linear(self.latent_size * 2, self.hidden_size),
                     nn.Sigmoid(),
-                    nn.Linear(self.hidden_size, 3),  # Number of output classes
+                    nn.Linear(self.hidden_size, 1),  # Number of output classes
                 )
-                self.isomerNN_loss = nn.CrossEntropyLoss()
+                # self.isomerNN_loss = nn.CrossEntropyLoss()
+                self.isomerNN_loss = nn.BCEWithLogitsLoss()
                 print("Added isomer layer")
             else:
                 raise ValueError("train_mode is not a valid value")
@@ -140,6 +142,104 @@ class JTpropVAE(nn.Module):
         z_mol = torch.randn(1, self.latent_size).cuda()
         return self.decode(z_tree, z_mol, prob_decode)
 
+    def optimize_denticity(
+        self,
+        x_batch,
+        sim_cutoff,
+        lr=0.2,
+        num_iter=20,
+        prob_decode=False,
+        desired_denticity="monodentate",
+    ):
+        """Optimize a given ligand in latent space.
+
+        Parameters
+        ----------
+        x_batch : list
+            List containing the pre-processed data for a ligand
+        sim_cutoff : float
+            Tanimoto similarity cutoff for the optimization.
+        lr : float
+            Learning rate for the optimization.
+        num_iter : int, optional
+            Number of steps along the gradient in latent space.
+        prob_decode : bool
+            Decoding param. Unclear what it does. Keep False
+        desired_denticity : str, optional
+            Which denticity to optimize towards
+
+        Returns
+        -------
+        new_smiles : str
+            The SMILES string of the optimized molecule.
+        tanimoto : float
+            The Tanimoto similarity between the optimized molecule and the starting molecule.
+        """
+        x_batch, x_prop, x_jtenc_holder, x_mpn_holder, x_jtmpn_holder = x_batch
+        x_tree_vecs, x_tree_mess, x_mol_vecs = self.encode(x_jtenc_holder, x_mpn_holder)
+
+        mol = Chem.MolFromSmiles(x_batch[0].smiles)
+        AllChem.GetMorganFingerprint(mol, 2)
+
+        z_tree_mean = self.T_mean(x_tree_vecs)
+        z_mol_mean = self.G_mean(x_mol_vecs)
+
+        mean = torch.cat([z_tree_mean, z_mol_mean], dim=1)
+        cur_vec = create_var(mean.data, True)
+
+        visited = []
+        cuda0 = torch.device("cuda:0")
+
+        # Apply different scaling on the gradient along the homo-lumo gap direction.
+        1.5 * lr
+
+        # Predictions holder
+        predictions = defaultdict(list)
+        tree_vec, mol_vec = torch.chunk(cur_vec, 2, dim=1)
+        new_smiles = self.decode(tree_vec, mol_vec, prob_decode=prob_decode)
+        print(x_batch[0].smiles, "encoded smiles: ", new_smiles)
+
+        # Step in gradient space
+        sig = nn.Sigmoid()
+        for step in range(num_iter):
+            # Now we get the gradients of the denticity layer.
+            denticity_gradient = torch.tensor([], dtype=torch.float32, device=cuda0)
+            denticity_prediction = self.denticityNN(cur_vec)
+            predictions["denticity"].append(denticity_prediction)
+
+            denticity_gradient = torch.autograd.grad(
+                denticity_prediction, cur_vec, retain_graph=True
+            )[0]
+            denticity_gradient = denticity_gradient.squeeze()
+            # Normalize the denticity gradient
+            denticity_norm = torch.nn.functional.normalize(denticity_gradient, dim=-1)
+            # Normalize the denticity gradient
+
+            # Add denticity gradient in given direction
+            if desired_denticity == "monodentate":  # Decrease probability
+                cur_vec = cur_vec - lr * denticity_norm * 2
+            elif desired_denticity == "bidentate":  # Increase probability
+                cur_vec = cur_vec + lr * denticity_norm * 2
+            else:
+                raise ValueError
+            #
+            cur_vec = create_var(cur_vec, True)
+            visited.append(cur_vec)
+
+        # Now we try to get the first latent vector that has a bidentate prediction
+        for i, elem in enumerate(visited):
+            if sig(self.denticityNN(elem)) > 0.5:
+                print(f"Found new denticity at {i}")
+                break
+
+        tree_vec, mol_vec = torch.chunk(elem, 2, dim=1)
+        new_smiles = self.decode(tree_vec, mol_vec, prob_decode=prob_decode)
+
+        # Check the SMILES for encoding atoms
+        if not is_valid_smiles(new_smiles):
+            print("Not valid smiles after denticity optimization")
+        return new_smiles
+
     def optimize(
         self,
         x_batch,
@@ -149,7 +249,6 @@ class JTpropVAE(nn.Module):
         type="charge",
         prob_decode=False,
         minimize=True,
-        desired_denticity="monodentate",
     ):
         """Optimize a given ligand in latent space.
 
@@ -169,8 +268,6 @@ class JTpropVAE(nn.Module):
             Decoding param. Unclear what it does. Keep False
         minimize : bool
             Whether to minimize or maximize the property.
-        desired_denticity : str, optional
-            Which denticity to optimize towards
 
         Returns
         -------
@@ -229,15 +326,6 @@ class JTpropVAE(nn.Module):
             gradient_holder = gradient_holder.squeeze()
 
             # Now we get the gradients of the denticity layer.
-            # denticity_gradient = torch.tensor([], dtype=torch.float32, device=cuda0)
-            # denticity_prediction = self.denticityNN(cur_vec)
-            # predictions["denticity"].append(denticity_prediction)
-            #
-            # denticity_gradient = torch.autograd.grad(
-            #     denticity_prediction, cur_vec, retain_graph=True
-            # )[0]
-            # denticity_gradient = denticity_gradient.squeeze()
-
             # The scaler decides the gradient direction
             scaler = -1 if minimize else 1
 
@@ -246,7 +334,9 @@ class JTpropVAE(nn.Module):
             norm1 = torch.nn.functional.normalize(gradient_holder[1], dim=-1)
 
             # Normalize the denticity gradient
-            # torch.nn.functional.normalize(denticity_gradient, dim=-1)
+            # Normalize the denticity gradient
+            # mono_norm = torch.nn.functional.normalize(dent_dy[0], dim=-1)
+            # bi_norm = torch.nn.functional.normalize(dent_dy[1], dim=-1)
 
             # Get the gradient magnitudes
             # n0 = torch.linalg.vector_norm(dydx3[0])
@@ -265,13 +355,6 @@ class JTpropVAE(nn.Module):
                 raise ValueError
 
             # Add denticity gradient in given direction
-            # if desired_denticity == "monodentate":  # Decrease probability
-            #     cur_vec = cur_vec - lr * denticity_norm * 2
-            # elif desired_denticity == "bidentate":  # Increase probability
-            #     cur_vec = cur_vec + lr * denticity_norm * 2
-            # else:
-            #     raise ValueError
-
             cur_vec = create_var(cur_vec, True)
             visited.append(cur_vec)
 
@@ -410,7 +493,7 @@ class JTpropVAE(nn.Module):
             elif term == "isomer":
                 # Learn isomer
                 x_isomer = x_isomer.type(
-                    torch.LongTensor
+                    torch.FloatTensor
                 )  # This is done in order to have it work with the cross entropy loss. Otherwise there is an error.
                 isomer_label = create_var(x_isomer)
                 isomer_label.int()

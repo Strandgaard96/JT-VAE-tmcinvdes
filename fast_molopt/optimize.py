@@ -173,6 +173,17 @@ def main():
             # Set the minimize flag based on the given direction
             minimize = True if dir[1] == "minimize" else False
 
+            # Optimizing for denticity
+            run_results = model.optimize_denticity(
+                batch,
+                sim_cutoff=sim_cutoff,
+                lr=opts.lr,
+                num_iter=100,
+                prob_decode=False,
+                desired_denticity="bidentate",
+            )
+            print(run_results)
+
             run_results = model.optimize(
                 batch,
                 sim_cutoff=sim_cutoff,
@@ -181,6 +192,7 @@ def main():
                 type=current_type,
                 prob_decode=False,
                 minimize=minimize,
+                desired_denticity="bidentate",
             )
             if not run_results["new_smiles"]:
                 print(f"{i} No valid optimized smiles could be found")
@@ -219,8 +231,11 @@ def create_input_files(input_df, output_dir_smiles, output_dir_props, extra_prop
         os.remove(output_dir_props)
 
     properties = ["homo-lumo", "Ir-cm5"]
+    # properties = ["HOMO-LUMO gap (Eh)", "Metal center charge"]
     for term in extra_properties:
         properties.append(term)
+
+    # input_df["sub_smi"] = input_df["sub_smi"].str.replace("Li","Ir")
 
     # property_header = ",".join(properties)
     input_df[properties].to_csv(output_dir_props, index=None, sep=",")
