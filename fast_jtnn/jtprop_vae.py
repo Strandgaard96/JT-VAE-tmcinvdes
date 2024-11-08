@@ -84,10 +84,10 @@ class JTpropVAE(nn.Module):
                 self.isomerNN = nn.Sequential(
                     nn.Linear(self.latent_size * 2, self.hidden_size),
                     nn.Sigmoid(),
-                    nn.Linear(self.hidden_size, 1),  # Number of output classes
+                    nn.Linear(self.hidden_size, 3),  # Number of output classes
                 )
-                # self.isomerNN_loss = nn.CrossEntropyLoss()
-                self.isomerNN_loss = nn.BCEWithLogitsLoss()
+                self.isomerNN_loss = nn.CrossEntropyLoss()
+                # self.isomerNN_loss = nn.BCEWithLogitsLoss()
                 print("Added isomer layer")
             else:
                 raise ValueError("train_mode is not a valid value")
