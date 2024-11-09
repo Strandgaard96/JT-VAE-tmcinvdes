@@ -78,6 +78,8 @@ class MolTreeDataset(Dataset):
             njobs=6,
             developer_mode=True,
         )
+        all_data = np.array(all_data)
+
         with open(os.path.join(self.train_path.parent / "processed.pickle"), "wb") as f:
             pickle.dump((all_data, prop_data), f)
 
@@ -160,15 +162,15 @@ class MolTreeDataset_prop(Dataset):
 
 
 def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
-    set_batch_nodeID(tree_batch, vocab)
+    # set_batch_nodeID(tree_batch, vocab)
     prop_batch_tensor = torch.FloatTensor(prop_batch)
     return tree_batch, prop_batch_tensor
 
 
-def set_batch_nodeID(mol_tree, vocab):
+def set_batch_nodeID(mol_batch, vocab):
     tot = 0
-    # for mol_tree in mol_batch:
-    for node in mol_tree.nodes:
-        node.idx = tot
-        node.wid = vocab.get_index(node.smiles)
-        tot += 1
+    for mol_tree in mol_batch:
+        for node in mol_tree.nodes:
+            node.idx = tot
+            node.wid = vocab.get_index(node.smiles)
+            tot += 1

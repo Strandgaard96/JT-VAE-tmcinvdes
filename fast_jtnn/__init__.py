@@ -1,5 +1,5 @@
 from .datautils import MolTreeDataset, MolTreeFolder, PairTreeFolder
-from .datautils_prop import MolTreeDataset_prop, MolTreeFolder_prop
+from .datautils_prop import MolTreeDataset_prop, MolTreeFolder_prop, set_batch_nodeID
 from .jtmpn import JTMPN
 from .jtnn_enc import JTNNEncoder
 from .jtnn_vae import JTNNVAE

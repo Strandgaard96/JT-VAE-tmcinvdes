@@ -32,7 +32,7 @@ sys.path.insert(0, str(source))
 # Initialize logger
 _logger: logging.Logger = logging.getLogger(__name__)
 
-from fast_jtnn import JTpropVAE, MolTreeFolder_prop, Vocab
+from fast_jtnn import JTpropVAE, MolTreeFolder_prop, Vocab, set_batch_nodeID
 
 
 def get_git_revision_short_hash() -> str:
@@ -123,6 +123,7 @@ def main_vae_train(
     total_step = args.load_epoch
 
     def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
+        set_batch_nodeID(tree_batch, vocab)
         smiles_batch = [tree.smiles for tree in tree_batch]
         jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
         jtenc_holder = jtenc_holder
@@ -170,7 +171,7 @@ def main_vae_train(
         custom_class_instances = []
         tensor_elements = []
 
-        for item in batch:
+        for i, item in enumerate(batch):
             custom_class_instance, tensor_element = item
             custom_class_instances.append(custom_class_instance)
             tensor_elements.append(tensor_element)
@@ -246,7 +247,7 @@ if __name__ == "__main__":
 
     # These should not be touched
     parser.add_argument("--hidden_size", type=int, default=450)
-    parser.add_argument("--batch_size", type=int, default=4)  # 2 when debugging)
+    parser.add_argument("--batch_size", type=int, default=8)  # 2 when debugging)
     parser.add_argument("--latent_size", type=int, default=56)
     parser.add_argument("--depthT", type=int, default=20)
     parser.add_argument("--depthG", type=int, default=3)
