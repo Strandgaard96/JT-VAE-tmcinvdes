@@ -1,5 +1,4 @@
 Cc1ccc(C)c(N2->[Ir]<-n3ccn(C)c3C=2)c1C
-[Li]<-O=C(C)CP(c1ccccc1)c1ccccc1
 CC(OCC(F)F)S1->[Ir]<-SCC1(S)C(O)(O)C(F)F
 [Li]<-n1ccc(C(=C)C(C)(C)C)c(C)c1
 SC(S)c1cccc(N2->[Ir]<-n3ccccc3C2)c1

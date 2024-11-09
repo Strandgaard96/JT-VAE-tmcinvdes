@@ -22,6 +22,10 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from fast_jtnn.jtmpn import JTMPN
+from fast_jtnn.jtnn_enc import JTNNEncoder
+from fast_jtnn.mpn import MPN
+
 source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, str(source))
 
@@ -118,6 +122,43 @@ def main_vae_train(
 
     total_step = args.load_epoch
 
+    def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
+        smiles_batch = [tree.smiles for tree in tree_batch]
+        jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
+        jtenc_holder = jtenc_holder
+        mpn_holder = MPN.tensorize(smiles_batch)
+
+        # TL debug, with https://stackoverflow.com/a/70323486 {
+        # print(prop_batch)
+        # print(type(prop_batch))
+        # print(prop_batch)
+        # print(type(prop_batch))
+        # torch.from_numpy(a)
+
+        cands = []
+        batch_idx = []
+        for i, mol_tree in enumerate(tree_batch):
+            for node in mol_tree.nodes:
+                # Leaf node's attachment is determined by neighboring node's attachment
+                if node.is_leaf or len(node.cands) == 1:
+                    continue
+                cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
+                batch_idx.extend([i] * len(node.cands))
+
+        # WARNING: THIS NEEDS TO BE COMMENTED OUT WHEN DOING LOCAL OPTIMIZATION.
+        # A NONE VALUE SHOULD BE RETURNED AS THIS IS NOT USED IN OPTIMIZATION ANYWAY
+        if optimize:
+            jtmpn_holder = None
+        else:
+            jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
+        batch_idx = torch.LongTensor(batch_idx)
+
+        return (
+            jtenc_holder,
+            mpn_holder,
+            (jtmpn_holder, batch_idx),
+        )
+
     dataset = MolTreeDataset(
         train_path=args.dataset_path,
         prop_path=args.dataset_prop,
@@ -125,12 +166,31 @@ def main_vae_train(
         developer_mode=args.developer_mode,
     )
 
+    def custom_collate_fn(batch):
+        custom_class_instances = []
+        tensor_elements = []
+
+        for item in batch:
+            custom_class_instance, tensor_element = item
+            custom_class_instances.append(custom_class_instance)
+            tensor_elements.append(tensor_element)
+
+        # Stack the tensor elements to create a batch tensor of shape (batch_size, 4)
+        tensor_batch = torch.stack(tensor_elements, dim=0)
+
+        # Return a tuple containing the list of custom class instances and the tensor batch
+        return custom_class_instances, tensor_batch
+
     loader = DataLoader(
-        dataset, batch_size=10, shuffle=False, collate_fn=lambda x: x[0]
+        dataset, batch_size=10, shuffle=False, collate_fn=custom_collate_fn
     )
 
     for epoch in tqdm(list(range(args.epoch)), position=0, leave=True):
-        for batch in loader:
+        for out in loader:
+            remainder = tensorize_prop(*out, vocab, assm=True, optimize=False)
+
+            batch = out + remainder
+
             total_step += 1
             model.zero_grad()
             loss, log_metrics = model(batch, beta)
@@ -203,7 +263,7 @@ if __name__ == "__main__":
     parser.add_argument("--kl_anneal_iter", type=int, default=3000)
 
     parser.add_argument("--epoch", type=int, default=150)
-    parser.add_argument("--print_iter", type=int, default=50)
+    parser.add_argument("--print_iter", type=int, default=1)
     parser.add_argument("--save_iter", type=int, default=5000)
 
     args = parser.parse_args()

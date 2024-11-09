@@ -161,46 +161,8 @@ class MolTreeDataset_prop(Dataset):
 
 def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
     set_batch_nodeID(tree_batch, vocab)
-    smiles_batch = tree_batch.smiles
-    jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
-    jtenc_holder = jtenc_holder
-    mpn_holder = MPN.tensorize(smiles_batch)
-
-    # TL debug, with https://stackoverflow.com/a/70323486 {
-    # print(prop_batch)
-    # print(type(prop_batch))
-    # prop_batch = np.vstack(prop_batch).astype(np.float)
-    # print(prop_batch)
-    # print(type(prop_batch))
-    # torch.from_numpy(a)
-
     prop_batch_tensor = torch.FloatTensor(prop_batch)
-
-    if assm is False:
-        return tree_batch, prop_batch_tensor, jtenc_holder, mpn_holder
-
-    cands = []
-    # for i, mol_tree in enumerate(tree_batch):
-    for node in tree_batch.nodes:
-        # Leaf node's attachment is determined by neighboring node's attachment
-        if node.is_leaf or len(node.cands) == 1:
-            continue
-        cands.extend([(cand, tree_batch.nodes, node) for cand in node.cands])
-
-    # WARNING: THIS WAS ADDED WHEN DOING LOCAL OPTIMIZATION.
-    # the holder throws an error when doing local optimization.
-    if optimize:
-        jtmpn_holder = None
-    else:
-        jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
-
-    return (
-        tree_batch,
-        prop_batch_tensor,
-        jtenc_holder,
-        mpn_holder,
-        jtmpn_holder,
-    )
+    return tree_batch, prop_batch_tensor
 
 
 def set_batch_nodeID(mol_tree, vocab):
