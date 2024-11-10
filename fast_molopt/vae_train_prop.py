@@ -44,20 +44,35 @@ def get_git_revision_short_hash() -> str:
 
 
 def custom_collate_fn(batch):
-    """Here we combine the tensors across the entries in a batch such that the
-    batch dimensions are (10,(10,4)"""
-    mol_tree_list = []
-    property_list = []
+    mol_trees, property_tensors, jtenc_holders, mpn_holders, jtmpn_data = (
+        [],
+        [],
+        [],
+        [],
+        [],
+    )
 
-    for i, item in enumerate(batch):
-        mol_tree, property_tensor = item
-        mol_tree_list.append(mol_tree)
-        property_list.append(property_tensor)
+    for mol_tree, property_tensor, jtenc, mpn, jtmpn in batch:
+        mol_trees.append(mol_tree)
+        property_tensors.append(property_tensor)
+        jtenc_holders.append(jtenc)
+        mpn_holders.append(mpn)
+        jtmpn_data.append(jtmpn)
 
-    # Stack the tensor elements to create a batch property tensor of shape (batch_size, 4)
-    property_stacked_tensor = torch.stack(property_list, dim=0)
+    # Stack tensors as needed
+    jtenc_batch = torch.stack(jtenc_holders)
+    mpn_batch = torch.stack(mpn_holders)
+    jtmpn_holder, batch_idx = zip(*jtmpn_data)
+    property_tensor_batch = torch.stack(property_tensors)
 
-    return mol_tree_list, property_stacked_tensor
+    # Return with property_tensor right after mol_tree
+    return (
+        mol_trees,
+        property_tensor_batch,
+        jtenc_batch,
+        mpn_batch,
+        (torch.stack(jtmpn_holder), torch.stack(batch_idx)),
+    )
 
 
 def main_vae_train(
@@ -124,49 +139,29 @@ def main_vae_train(
 
     total_step = args.load_epoch
 
-    def process_trees(tree_batch, vocab, assm=True, optimize=False):
-        "This function performs extra featurization of the mol trees that is needed during training"
-        set_batch_nodeID(tree_batch, vocab)
-        smiles_batch = [tree.smiles for tree in tree_batch]
-        jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
-        jtenc_holder = jtenc_holder
-        mpn_holder = MPN.tensorize(smiles_batch)
-
-        cands = []
-        batch_idx = []
-        for i, mol_tree in enumerate(tree_batch):
-            for node in mol_tree.nodes:
-                # Leaf node's attachment is determined by neighboring node's attachment
-                if node.is_leaf or len(node.cands) == 1:
-                    continue
-                cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
-                batch_idx.extend([i] * len(node.cands))
-
-        jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
-        batch_idx = torch.LongTensor(batch_idx)
-
-        return (
-            jtenc_holder,
-            mpn_holder,
-            (jtmpn_holder, batch_idx),
-        )
-
+    # Initialize the dataset
     dataset = MolTreeDataset(
-        train_path=args.dataset_path,
-        prop_path=args.dataset_prop,
-        vocab_path=args.vocab_path,
-        developer_mode=args.developer_mode,
+        smiles_path=args.dataset_path,
+        properties_path=args.dataset_prop,
+        vocab_path=args.vocab_path,  # Assume `vocab` is defined
+        batch_size=args.batch_size,
+        cache_dir="cache/batches",
     )
 
+    # DataLoader with batch_size=1, since each file is a full batch
     loader = DataLoader(
-        dataset, batch_size=args.batch_size, shuffle=False, collate_fn=custom_collate_fn
+        dataset,
+        batch_size=1,  # Each item is already a batch
+        shuffle=True,  # Shuffle to randomize batch order during training
+        collate_fn=lambda x: x[0],  # Unwrap the single-item list returned by DataLoader
     )
 
-    for epoch in tqdm(list(range(args.epoch)), position=0, leave=True):
-        for out in loader:
+    for epoch in tqdm(
+        range(args.epoch), position=0, leave=True, desc="Training epochs"
+    ):
+        for batch in loader:
             # As of now, the featurization of each batch is performed here
-            feature_tensors = process_trees(out[0], vocab, assm=True, optimize=False)
-            batch = out + feature_tensors
+            # feature_tensors = process_trees(out[0], vocab, assm=True, optimize=False)
 
             total_step += 1
             model.zero_grad()
@@ -181,8 +176,8 @@ def main_vae_train(
                     [f"Loss: {loss:.2f}", f" Beta: {beta:.5f}"]
                     + [f" {k}: {v:.3f}" for k, v in log_metrics.items()]
                     + [
-                        f"PNorm: {model.param_norm:.3f}",
-                        f"GNorm: {model.grad_norm:.3f}",
+                        f"PNorm: {model.param_norm():.3f}",
+                        f"GNorm: {model.grad_norm():.3f}",
                     ]
                 )
                 log_string = ",".join(log_list)

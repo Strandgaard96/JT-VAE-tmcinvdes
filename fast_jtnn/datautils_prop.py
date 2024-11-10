@@ -2,88 +2,187 @@ import itertools
 import os
 import pickle as pickle
 import random
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from fast_jtnn.jtmpn import JTMPN
 from fast_jtnn.jtnn_enc import JTNNEncoder
 from fast_jtnn.mpn import MPN
 from fast_jtnn.vocab import Vocab
-from fast_molopt.preprocess_prop import process_mol_trees
+from fast_molopt.preprocess_prop import (
+    load_smiles_and_props_from_files,
+    process_mol_trees,
+)
+
+# class MolTreeDataset(Dataset):
+#     def __init__(
+#         self,
+#         train_path: str,
+#         prop_path: str,
+#         vocab_path: str,
+#         developer_mode=False,
+#     ):
+#         """Constructor for the MolTrees.
+#
+#         Arguments:
+#             root (str): The directory path in which to store raw and processed data.
+#             developer_mode (bool): If set to True will only consider 1000 first data points.
+#         """
+#
+#         # directory to getdataset_dirraw data from
+#         self.train_path = train_path
+#         self.root = train_path.parent.name
+#         self.prop_path = prop_path
+#         self._raw_dir = self.root + "/raw/"
+#         self.assm = True
+#         self.optimize = False
+#
+#         vocab = [x.strip("\r\n ") for x in open(vocab_path)]
+#         self.vocab = Vocab(vocab)
+#
+#         # if developer mode is set to True will only consider first 1000 examples
+#         self.developer_mode = developer_mode
+#
+#         # if root path does not exist create folder
+#         if not os.path.isdir(self.root):
+#             os.makedirs(self.root, exist_ok=True)
+#
+#         # start super class
+#         super().__init__()
+#
+#         self.preprocess()
+#
+#         with open(self.train_path.parent / "processed.pickle", "rb") as fh:
+#             self.trees, self.props = pickle.load(fh)
+#         if self.developer_mode:
+#             self.trees = self.trees[0:100]
+#             self.props = self.props[0:100]
+#
+#     def __len__(self):
+#         """Getter for the number of processed pytorch graphs."""
+#         return len(self.trees)
+#
+#     def __getitem__(self, idx):
+#         return tensorize_prop(
+#             self.trees[idx],
+#             self.props[idx],
+#             self.vocab,
+#             assm=self.assm,
+#             optimize=self.optimize,
+#         )
+#
+#     def preprocess(self):
+#         all_data, prop_data = process_mol_trees(
+#             train_path=self.train_path,
+#             prop_path=self.prop_path,
+#             njobs=6,
+#             developer_mode=self.developer_mode,
+#         )
+#         all_data = np.array(all_data)
+#
+#         prop_data = torch.FloatTensor(prop_data)
+#
+#         with open(os.path.join(self.train_path.parent / "processed.pickle"), "wb") as f:
+#             pickle.dump((all_data, prop_data), f)
 
 
 class MolTreeDataset(Dataset):
     def __init__(
         self,
-        train_path: str,
-        prop_path: str,
-        vocab_path: str,
+        smiles_path,
+        properties_path,
+        vocab_path,
+        batch_size,
+        cache_dir="cache/batches",
         developer_mode=False,
     ):
-        """Constructor for the MolTrees.
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        Arguments:
-            root (str): The directory path in which to store raw and processed data.
-            developer_mode (bool): If set to True will only consider 1000 first data points.
-        """
-
-        # directory to getdataset_dirraw data from
-        self.train_path = train_path
-        self.root = train_path.parent.name
-        self.prop_path = prop_path
-        self._raw_dir = self.root + "/raw/"
-        self.assm = True
-        self.optimize = False
+        self.batch_size = batch_size
 
         vocab = [x.strip("\r\n ") for x in open(vocab_path)]
         self.vocab = Vocab(vocab)
 
-        # if developer mode is set to True will only consider first 1000 examples
-        self.developer_mode = developer_mode
+        # Load SMILES and properties data
+        self.smiles_list, self.properties_array = load_smiles_and_props_from_files(
+            smiles_path, properties_path, developer_mode
+        )
 
-        # if root path does not exist create folder
-        if not os.path.isdir(self.root):
-            os.makedirs(self.root, exist_ok=True)
+        # Check if cache exists; if not, create it
+        if not self.cache_dir.exists() or not list(self.cache_dir.glob("batch_*.pt")):
+            print("Cache not found. Creating batch cache...")
+            self.cache_batches()
 
-        # start super class
-        super().__init__()
+        # Load list of batch files
+        self.batch_files = sorted(self.cache_dir.glob("batch_*.pt"))
 
-        self.preprocess()
+    def cache_batches(self):
+        """Processes data in batches and saves each batch to a separate file in
+        cache_dir."""
+        num_samples = len(self.smiles_list)
+        num_batches = (
+            num_samples + self.batch_size - 1
+        ) // self.batch_size  # Calculate total number of batches
 
-        with open(self.train_path.parent / "processed.pickle", "rb") as fh:
-            self.trees, self.props = pickle.load(fh)
-        if self.developer_mode:
-            self.trees = self.trees[0:100]
-            self.props = self.props[0:100]
+        for batch_idx in tqdm(range(num_batches), desc="Caching batches", unit="batch"):
+            # Determine the range of indices for this batch
+            start_idx = batch_idx * self.batch_size
+            end_idx = min(start_idx + self.batch_size, num_samples)
+
+            # Process each item in the batch
+
+            mol_trees = process_mol_trees(self.smiles_list[start_idx:end_idx], njobs=6)
+            property_tensors = torch.tensor(
+                self.properties_array[start_idx:end_idx], dtype=torch.float32
+            )
+
+            # Process mol_tree to generate required tensors
+            jtenc_holders, mpn_holders, jtmpn_data = process_trees(
+                mol_trees, self.vocab
+            )
+            jtmpn_holders, batch_idx_tensor = jtmpn_data
+
+            # # Append processed data to batch lists
+            # mol_trees.append(mol_tree)
+            # property_tensors.append(property_tensor)
+            # jtenc_holders.append(jtenc_holder)
+            # mpn_holders.append(mpn_holder)
+            # jtmpn_holders.append(jtmpn_holder)
+            # batch_idxs.append(batch_idx_tensor)
+
+            # Save the entire batch to a single file
+            batch_data = {
+                "mol_trees": mol_trees,
+                "property_tensors": property_tensors,
+                "jtenc_holders": jtenc_holders,
+                "mpn_holders": mpn_holders,
+                "jtmpn_holders": jtmpn_holders,
+                "batch_idxs": batch_idx_tensor,
+            }
+            torch.save(batch_data, self.cache_dir / f"batch_{batch_idx}.pt")
+
+        print(f"Cached {num_batches} batches to {self.cache_dir}")
 
     def __len__(self):
-        """Getter for the number of processed pytorch graphs."""
-        return len(self.trees)
+        return len(self.batch_files)
 
     def __getitem__(self, idx):
-        return tensorize_prop(
-            self.trees[idx],
-            self.props[idx],
-            self.vocab,
-            assm=self.assm,
-            optimize=self.optimize,
+        # Load the entire batch from a single file
+        batch_data = torch.load(self.batch_files[idx])
+
+        # Return batch data directly as a tuple, ready for the model
+        return (
+            batch_data["mol_trees"],
+            batch_data["property_tensors"],
+            batch_data["jtenc_holders"],
+            batch_data["mpn_holders"],
+            (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
         )
-
-    def preprocess(self):
-        all_data, prop_data = process_mol_trees(
-            train_path=self.train_path,
-            prop_path=self.prop_path,
-            njobs=6,
-            developer_mode=self.developer_mode,
-        )
-        all_data = np.array(all_data)
-
-        prop_data = torch.FloatTensor(prop_data)
-
-        with open(os.path.join(self.train_path.parent / "processed.pickle"), "wb") as f:
-            pickle.dump((all_data, prop_data), f)
 
 
 class MolTreeFolder_prop(object):

@@ -1,5 +1,4 @@
 import copy
-import math
 
 import rdkit.Chem as Chem
 import torch
@@ -42,20 +41,6 @@ class JTNNVAE(nn.Module):
         self.T_var = nn.Linear(hidden_size, latent_size)
         self.G_mean = nn.Linear(hidden_size, latent_size)
         self.G_var = nn.Linear(hidden_size, latent_size)
-
-    def param_norm(self):
-        return math.sqrt(sum([(p.norm().item() ** 2) for p in self.parameters()]))
-
-    def grad_norm(self):
-        return math.sqrt(
-            sum(
-                [
-                    (p.grad.norm().item() ** 2)
-                    for p in self.parameters()
-                    if p.grad is not None
-                ]
-            )
-        )
 
     def encode(self, jtenc_holder, mpn_holder):
         tree_vecs, tree_mess = self.jtnn(*jtenc_holder)
