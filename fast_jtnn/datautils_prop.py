@@ -30,10 +30,19 @@ class MolTreeDataset(Dataset):
         vocab = [x.strip("\r\n ") for x in open(vocab_path)]
         self.vocab = Vocab(vocab)
 
-        # Load SMILES and properties data
-        self.smiles_list, self.properties_array = load_smiles_and_props_from_files(
-            smiles_path, properties_path, developer_mode
-        )
+        if properties_path:
+            print("Loading SMILES and properties")
+            # Load SMILES and properties data
+            self.smiles_list, self.properties_array = load_smiles_and_props_from_files(
+                smiles_path, properties_path, developer_mode
+            )
+            self.props = True
+        else:
+            self.props = False
+            print("Loading SMILES")
+            with open(smiles_path) as f:
+                smiles = [line.strip("\r\n ").split()[0] for line in f]
+            self.smiles_list = smiles
 
         # Check if cache exists; if not, create it
         if not self.cache_dir.exists() or not list(self.cache_dir.glob("batch_*.pt")):
@@ -58,9 +67,13 @@ class MolTreeDataset(Dataset):
 
             mol_trees = get_mol_trees(self.smiles_list[start_idx:end_idx], njobs=6)
             set_batch_nodeID(mol_trees, self.vocab)
-            property_tensors = torch.tensor(
-                self.properties_array[start_idx:end_idx], dtype=torch.float32
-            )
+
+            if self.props:
+                property_tensors = torch.tensor(
+                    self.properties_array[start_idx:end_idx], dtype=torch.float32
+                )
+            else:
+                property_tensors = None
 
             # Process mol_tree to generate required tensors
             jtenc_holders, mpn_holders, jtmpn_data = get_tensors(mol_trees)
@@ -85,13 +98,21 @@ class MolTreeDataset(Dataset):
     def __getitem__(self, idx):
         # Load the entire batch from a single file
         batch_data = torch.load(self.batch_files[idx])
-        return (
-            batch_data["mol_trees"],
-            batch_data["property_tensors"],
-            batch_data["jtenc_holders"],
-            batch_data["mpn_holders"],
-            (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
-        )
+        if self.props:
+            return (
+                batch_data["mol_trees"],
+                batch_data["property_tensors"],
+                batch_data["jtenc_holders"],
+                batch_data["mpn_holders"],
+                (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
+            )
+        else:
+            return (
+                batch_data["mol_trees"],
+                batch_data["jtenc_holders"],
+                batch_data["mpn_holders"],
+                (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
+            )
 
 
 def set_batch_nodeID(mol_batch, vocab):

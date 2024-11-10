@@ -94,13 +94,17 @@ class JTNNVAE(nn.Module):
             x_batch, x_jtmpn_holder, z_mol_vecs, x_tree_mess
         )
 
-        return (
-            word_loss + topo_loss + assm_loss + beta * kl_div,
-            kl_div.item(),
-            word_acc,
-            topo_acc,
-            assm_acc,
-        )
+        # Standard loss
+        standard_loss = word_loss + topo_loss + assm_loss + beta * kl_div
+        # Standard log
+        log_metrics = {
+            "kl_div": kl_div.item(),
+            "word_acc": word_acc * 100,
+            "topo_acc": topo_acc * 100,
+            "assm_acc": assm_acc * 100,
+        }
+
+        return standard_loss, log_metrics
 
     def assm(self, mol_batch, jtmpn_holder, x_mol_vecs, x_tree_mess):
         jtmpn_holder, batch_idx = jtmpn_holder
