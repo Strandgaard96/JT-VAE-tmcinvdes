@@ -5,15 +5,12 @@ import sys
 import time
 from pathlib import Path
 
-from preprocess_prop import process_mol_trees
-
 from fast_jtnn.datautils_prop import MolTreeDataset
 
 sys.path.append("../")
 
 import subprocess
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -21,17 +18,13 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from fast_jtnn.jtmpn import JTMPN
-from fast_jtnn.jtnn_enc import JTNNEncoder
-from fast_jtnn.mpn import MPN
-
 source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, str(source))
 
 # Initialize logger
 _logger: logging.Logger = logging.getLogger(__name__)
 
-from fast_jtnn import JTpropVAE, MolTreeFolder_prop, Vocab, set_batch_nodeID
+from fast_jtnn import JTpropVAE, Vocab
 
 
 def get_git_revision_short_hash() -> str:
@@ -40,38 +33,6 @@ def get_git_revision_short_hash() -> str:
         subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
         .decode("ascii")
         .strip()
-    )
-
-
-def custom_collate_fn(batch):
-    mol_trees, property_tensors, jtenc_holders, mpn_holders, jtmpn_data = (
-        [],
-        [],
-        [],
-        [],
-        [],
-    )
-
-    for mol_tree, property_tensor, jtenc, mpn, jtmpn in batch:
-        mol_trees.append(mol_tree)
-        property_tensors.append(property_tensor)
-        jtenc_holders.append(jtenc)
-        mpn_holders.append(mpn)
-        jtmpn_data.append(jtmpn)
-
-    # Stack tensors as needed
-    jtenc_batch = torch.stack(jtenc_holders)
-    mpn_batch = torch.stack(mpn_holders)
-    jtmpn_holder, batch_idx = zip(*jtmpn_data)
-    property_tensor_batch = torch.stack(property_tensors)
-
-    # Return with property_tensor right after mol_tree
-    return (
-        mol_trees,
-        property_tensor_batch,
-        jtenc_batch,
-        mpn_batch,
-        (torch.stack(jtmpn_holder), torch.stack(batch_idx)),
     )
 
 
@@ -109,6 +70,8 @@ def main_vae_train(
         args.depthG,
         args.train_mode,
     ).cuda()
+    if args.load_previous_model:
+        model.load_state_dict(torch.load(args.model_path))
     _logger.info(model)
 
     for param in model.parameters():
@@ -116,9 +79,6 @@ def main_vae_train(
             nn.init.constant_(param, 0)
         else:
             nn.init.xavier_normal_(param)
-
-    if args.load_previous_model:
-        model.load_state_dict(torch.load(args.model_path))
 
     _logger.info(
         (
@@ -152,7 +112,7 @@ def main_vae_train(
     loader = DataLoader(
         dataset,
         batch_size=1,  # Each item is already a batch
-        shuffle=True,  # Shuffle to randomize batch order during training
+        shuffle=False,
         collate_fn=lambda x: x[0],  # Unwrap the single-item list returned by DataLoader
     )
 
@@ -160,9 +120,6 @@ def main_vae_train(
         range(args.epoch), position=0, leave=True, desc="Training epochs"
     ):
         for batch in loader:
-            # As of now, the featurization of each batch is performed here
-            # feature_tensors = process_trees(out[0], vocab, assm=True, optimize=False)
-
             total_step += 1
             model.zero_grad()
             loss, log_metrics = model(batch, beta)

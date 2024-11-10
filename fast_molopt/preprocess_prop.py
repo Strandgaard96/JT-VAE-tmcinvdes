@@ -66,7 +66,7 @@ def load_smiles_and_props_from_files(train_path, prop_path, developer_mode=False
     return (smiles, prop_data.to_numpy())
 
 
-def process_mol_trees(smiles, njobs):
+def get_mol_trees(smiles, njobs):
     print("Converting SMILES to MolTrees.....")
     pool = Pool(njobs)
     all_data = pool.map(create_mol_tree, smiles)
@@ -77,7 +77,7 @@ def process_mol_trees(smiles, njobs):
 
 
 def main_preprocess(train_path, prop_path, output_path, num_splits=10, njobs=1):
-    process_mol_trees(train_path, prop_path, num_splits, output_path, njobs)
+    get_mol_trees(train_path, prop_path, num_splits, output_path, njobs)
     return True
 
 
@@ -98,6 +98,6 @@ if __name__ == "__main__":
 
     opts = parser.parse_args()
 
-    process_mol_trees(
+    get_mol_trees(
         opts.train_path, opts.prop_path, opts.nsplits, opts.output_path, opts.njobs
     )
