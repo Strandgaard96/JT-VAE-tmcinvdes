@@ -1,6 +1,5 @@
 import argparse
 import logging
-import math
 import os
 import sys
 import time
@@ -42,6 +41,23 @@ def get_git_revision_short_hash() -> str:
         .decode("ascii")
         .strip()
     )
+
+
+def custom_collate_fn(batch):
+    """Here we combine the tensors across the entries in a batch such that the
+    batch dimensions are (10,(10,4)"""
+    mol_tree_list = []
+    property_list = []
+
+    for i, item in enumerate(batch):
+        mol_tree, property_tensor = item
+        mol_tree_list.append(mol_tree)
+        property_list.append(property_tensor)
+
+    # Stack the tensor elements to create a batch property tensor of shape (batch_size, 4)
+    property_stacked_tensor = torch.stack(property_list, dim=0)
+
+    return mol_tree_list, property_stacked_tensor
 
 
 def main_vae_train(
@@ -106,35 +122,15 @@ def main_vae_train(
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
 
-    def param_norm(m):
-        return math.sqrt(sum([(p.norm().item() ** 2) for p in m.parameters()]))
-
-    def grad_norm(m):
-        return math.sqrt(
-            sum(
-                [
-                    (p.grad.norm().item() ** 2)
-                    for p in m.parameters()
-                    if p.grad is not None
-                ]
-            )
-        )
-
     total_step = args.load_epoch
 
-    def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
+    def process_trees(tree_batch, vocab, assm=True, optimize=False):
+        "This function performs extra featurization of the mol trees that is needed during training"
         set_batch_nodeID(tree_batch, vocab)
         smiles_batch = [tree.smiles for tree in tree_batch]
         jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
         jtenc_holder = jtenc_holder
         mpn_holder = MPN.tensorize(smiles_batch)
-
-        # TL debug, with https://stackoverflow.com/a/70323486 {
-        # print(prop_batch)
-        # print(type(prop_batch))
-        # print(prop_batch)
-        # print(type(prop_batch))
-        # torch.from_numpy(a)
 
         cands = []
         batch_idx = []
@@ -146,12 +142,7 @@ def main_vae_train(
                 cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
                 batch_idx.extend([i] * len(node.cands))
 
-        # WARNING: THIS NEEDS TO BE COMMENTED OUT WHEN DOING LOCAL OPTIMIZATION.
-        # A NONE VALUE SHOULD BE RETURNED AS THIS IS NOT USED IN OPTIMIZATION ANYWAY
-        if optimize:
-            jtmpn_holder = None
-        else:
-            jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
+        jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
         batch_idx = torch.LongTensor(batch_idx)
 
         return (
@@ -167,30 +158,15 @@ def main_vae_train(
         developer_mode=args.developer_mode,
     )
 
-    def custom_collate_fn(batch):
-        custom_class_instances = []
-        tensor_elements = []
-
-        for i, item in enumerate(batch):
-            custom_class_instance, tensor_element = item
-            custom_class_instances.append(custom_class_instance)
-            tensor_elements.append(tensor_element)
-
-        # Stack the tensor elements to create a batch tensor of shape (batch_size, 4)
-        tensor_batch = torch.stack(tensor_elements, dim=0)
-
-        # Return a tuple containing the list of custom class instances and the tensor batch
-        return custom_class_instances, tensor_batch
-
     loader = DataLoader(
         dataset, batch_size=args.batch_size, shuffle=False, collate_fn=custom_collate_fn
     )
 
     for epoch in tqdm(list(range(args.epoch)), position=0, leave=True):
         for out in loader:
-            remainder = tensorize_prop(*out, vocab, assm=True, optimize=False)
-
-            batch = out + remainder
+            # As of now, the featurization of each batch is performed here
+            feature_tensors = process_trees(out[0], vocab, assm=True, optimize=False)
+            batch = out + feature_tensors
 
             total_step += 1
             model.zero_grad()
@@ -205,8 +181,8 @@ def main_vae_train(
                     [f"Loss: {loss:.2f}", f" Beta: {beta:.5f}"]
                     + [f" {k}: {v:.3f}" for k, v in log_metrics.items()]
                     + [
-                        f"PNorm: {param_norm(model):.3f}",
-                        f"GNorm: {grad_norm(model):.3f}",
+                        f"PNorm: {model.param_norm:.3f}",
+                        f"GNorm: {model.grad_norm:.3f}",
                     ]
                 )
                 log_string = ",".join(log_list)

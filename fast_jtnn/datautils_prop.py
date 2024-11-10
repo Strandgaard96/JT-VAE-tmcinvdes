@@ -76,9 +76,11 @@ class MolTreeDataset(Dataset):
             train_path=self.train_path,
             prop_path=self.prop_path,
             njobs=6,
-            developer_mode=True,
+            developer_mode=self.developer_mode,
         )
         all_data = np.array(all_data)
+
+        prop_data = torch.FloatTensor(prop_data)
 
         with open(os.path.join(self.train_path.parent / "processed.pickle"), "wb") as f:
             pickle.dump((all_data, prop_data), f)
@@ -174,3 +176,31 @@ def set_batch_nodeID(mol_batch, vocab):
             node.idx = tot
             node.wid = vocab.get_index(node.smiles)
             tot += 1
+
+
+def process_trees(tree_batch, vocab, assm=True, optimize=False):
+    "This function performs extra featurization of the mol trees that is needed during training"
+    set_batch_nodeID(tree_batch, vocab)
+    smiles_batch = [tree.smiles for tree in tree_batch]
+    jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
+    jtenc_holder = jtenc_holder
+    mpn_holder = MPN.tensorize(smiles_batch)
+
+    cands = []
+    batch_idx = []
+    for i, mol_tree in enumerate(tree_batch):
+        for node in mol_tree.nodes:
+            # Leaf node's attachment is determined by neighboring node's attachment
+            if node.is_leaf or len(node.cands) == 1:
+                continue
+            cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
+            batch_idx.extend([i] * len(node.cands))
+
+    jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
+    batch_idx = torch.LongTensor(batch_idx)
+
+    return (
+        jtenc_holder,
+        mpn_holder,
+        (jtmpn_holder, batch_idx),
+    )
