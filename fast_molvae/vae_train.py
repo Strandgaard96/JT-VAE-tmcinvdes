@@ -17,7 +17,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from fast_jtnn.datautils_prop import MolTreeDataset
+from fast_jtnn import MolTreeDataset
 
 source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 sys.path.insert(0, str(source))

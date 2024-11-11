@@ -16,7 +16,7 @@ from .chemutils import (
     is_valid_smiles,
     set_atommap,
 )
-from .datautils_prop import tensorize_prop
+from .datautils_prop import get_tensors
 from .jtmpn import JTMPN
 from .jtnn_dec import JTNNDecoder
 from .jtnn_enc import JTNNEncoder
@@ -115,16 +115,16 @@ class JTpropVAE(nn.Module):
         mol_vecs = self.mpn(*mpn_holder)
         return tree_vecs, tree_mess, mol_vecs
 
-    def encode_latent_from_smiles(self, smiles_list, props):
-        tree_batch = []
-        for i, elem in enumerate(smiles_list):
-            s = MolTree(elem)
-            tree_batch.append(s)
-        _, _, jtenc_holder, mpn_holder = tensorize_prop(
-            tree_batch, props, self.vocab, assm=False
-        )
-        z1, z2 = self.encode_latent(jtenc_holder, mpn_holder)
-        return z1, z2
+    # def encode_latent_from_smiles(self, smiles_list, props):
+    #     tree_batch = []
+    #     for i, elem in enumerate(smiles_list):
+    #         s = MolTree(elem)
+    #         tree_batch.append(s)
+    #     _, _, jtenc_holder, mpn_holder_ = get_tensors(
+    #         tree_batch, props, self.vocab, assm=False
+    #     )
+    #     z1, z2 = self.encode_latent(jtenc_holder, mpn_holder)
+    #     return z1, z2
 
     def encode_latent(self, jtenc_holder, mpn_holder):
         tree_vecs, _ = self.jtnn(*jtenc_holder)
