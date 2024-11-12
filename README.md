@@ -1,4 +1,4 @@
-# JT-VAE: Deep Generative Model for the Dual-Objective Inverse Design of Metal Complexes
+# Deep Generative Model for the Dual-Objective Inverse Design of Metal Complexes
 
 This repo contains the modified [JT-VAE](https://github.com/Bibyutatsu/FastJTNNpy3) code for the publication ["Deep Generative Model for the Dual-Objective Inverse Design of Metal Complexes."](https://doi.org/10.26434/chemrxiv-2024-mzs7b)
 
@@ -15,6 +15,7 @@ The tree decomposition will give kekulization errors with newer versions of RDKi
 - `fast_molvae/` contains codes for unconditional JT-VAE training. Please refer to `fast_molvae/README.md` for details.
 - `fast_jtnn/` contains codes for model and data implementation.
 - `fast_molopt/` contains codes for training a conditional JT-VAE and for performing conditional optimization with a trained model.
+- `data/` conatains various ligand training data.
 
 #### FastJTNNpy3
 
