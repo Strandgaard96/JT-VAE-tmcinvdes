@@ -5,8 +5,6 @@ import sys
 import time
 from pathlib import Path
 
-from fast_jtnn.datautils_prop import MolTreeDataset
-
 sys.path.append("../")
 
 import subprocess
@@ -25,6 +23,7 @@ sys.path.insert(0, str(source))
 _logger: logging.Logger = logging.getLogger(__name__)
 
 from fast_jtnn import JTpropVAE, Vocab
+from fast_jtnn.datautils_prop import MolTreeDataset
 
 
 def get_git_revision_short_hash() -> str:
@@ -42,7 +41,6 @@ def main_vae_train(
     #  Load the vocab
     with open(args.vocab_path) as f:
         vocab = f.read().splitlines()
-    # vocab = [x.strip("\r\n ") for x in open(args.vocab)]
     vocab = Vocab(vocab)
 
     output_dir = Path(f"train_{time.strftime('%Y%m%d-%H%M%S')}")
@@ -59,7 +57,7 @@ def main_vae_train(
         ],
     )
 
-    # Unpack beta
+    # Unpack args
     beta = args.beta
 
     model = JTpropVAE(
@@ -97,18 +95,16 @@ def main_vae_train(
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
     scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
 
-    total_step = args.load_epoch
-
     # Initialize the dataset
     dataset = MolTreeDataset(
         smiles_path=args.dataset_path,
         properties_path=args.dataset_prop,
-        vocab_path=args.vocab_path,  # Assume `vocab` is defined
+        vocab_path=args.vocab_path,
         batch_size=args.batch_size,
         cache_dir="cache/batches",
     )
 
-    # DataLoader with batch_size=1, since each file is a full batch
+    # DataLoader with batch_size=1, since each iteration yields a full batch
     loader = DataLoader(
         dataset,
         batch_size=1,  # Each item is already a batch
@@ -116,6 +112,7 @@ def main_vae_train(
         collate_fn=lambda x: x[0],  # Unwrap the single-item list returned by DataLoader
     )
 
+    total_step = 0
     for epoch in tqdm(
         range(args.epoch), position=0, leave=True, desc="Training epochs"
     ):
@@ -140,16 +137,17 @@ def main_vae_train(
                 log_string = ",".join(log_list)
                 _logger.info(log_string)
 
-            if total_step % args.save_iter == 0:
-                torch.save(model.state_dict(), output_dir / f"model.iter-{total_step}")
+            if epoch % args.save_iter == 0:
+                torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
 
-            if total_step % args.anneal_iter == 0:
+            if epoch % args.anneal_iter == 0:
                 scheduler.step()
                 _logger.info(("learning rate: %.6f" % scheduler.get_lr()[0]))
 
             # Update the beta value
-            if total_step % args.kl_anneal_iter == 0 and total_step >= args.warmup:
+            if epoch % args.kl_anneal_iter == 0 and epoch >= args.warmup:
                 beta = min(args.max_beta, beta + args.step_beta)
+                _logger.ingo(f"Warmup phase done. Strating annealing, new beta: {beta}")
 
     torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
     return model
@@ -175,25 +173,27 @@ if __name__ == "__main__":
 
     # These should not be touched
     parser.add_argument("--hidden_size", type=int, default=450)
-    parser.add_argument("--batch_size", type=int, default=8)  # 2 when debugging)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--latent_size", type=int, default=56)
     parser.add_argument("--depthT", type=int, default=20)
     parser.add_argument("--depthG", type=int, default=3)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--clip_norm", type=float, default=50.0)
 
-    # These might need to be adjusted for a new problem
+    # The following values should be tailored to each new dataset
     parser.add_argument("--beta", type=float, default=0.006)
     parser.add_argument("--step_beta", type=float, default=0.002)
     parser.add_argument("--max_beta", type=float, default=1.0)
-    parser.add_argument("--warmup", type=int, default=500)
+    parser.add_argument("--warmup", type=int, default=2)
     parser.add_argument("--anneal_rate", type=float, default=0.9)
-    parser.add_argument("--anneal_iter", type=int, default=1000)
-    parser.add_argument("--kl_anneal_iter", type=int, default=3000)
+    parser.add_argument("--anneal_iter", type=int, default=5)
+    parser.add_argument("--kl_anneal_iter", type=int, default=15)
 
     parser.add_argument("--epoch", type=int, default=150)
     parser.add_argument("--print_iter", type=int, default=1)
-    parser.add_argument("--save_iter", type=int, default=5000)
+    parser.add_argument(
+        "--save_iter", type=int, default=50, help="How often to save the model"
+    )
 
     args = parser.parse_args()
     _logger.info(args)
