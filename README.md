@@ -4,8 +4,6 @@ This repo contains the modified JT-VAE code for the publication ["Deep Generativ
 
 This repo is a fork of the repo : ["Python 3 Version of Fast Junction Tree Variational Autoencoder for Molecular Graph Generation (ICML 2018)"](https://github.com/Bibyutatsu/FastJTNNpy3)
 
-Some functionality has been reworked / fixed compared to the original repo. I implemented a working fast_molopt where the property JTpropVAE is changed to work with the fast_jtnn functionality.
-
 ## Requirements
 
 The version of RDKit is very important. For newer versions of RDKit the model does not work!
@@ -14,6 +12,6 @@ The [environment.yml](environment.yml) file is an export of a working conda envi
 
 ## Code for model training
 
-- `fast_molvae/` contains codes for JT-VAE training. Please refer to `fast_molvae/README.md` for details.
+- `fast_molvae/` contains codes for unconditional JT-VAE training. Please refer to `fast_molvae/README.md` for details.
 - `fast_jtnn/` contains codes for model implementation.
 - `fast_molopt/` contains codes for training a conditional JT-VAE.
