@@ -20,5 +20,3 @@ The tree decomposition will give kekulization errors with newer versions of RDKi
 #### FastJTNNpy3
 
 The code is based on a fork of [FastJTNNpy3](https://github.com/Bibyutatsu/FastJTNNpy3).
-
-- `fast_jtnn/` contains codes for model implementation.
