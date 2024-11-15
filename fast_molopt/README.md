@@ -1,9 +1,5 @@
 # Conditional JT-VAE training
 
-## Important notes
-
-The property JT-VAE from the original JT-VAE repo was not compatible with the rest of the code. I adapted it to work with the new data processing.
-
 ## Training of conditional JT-VAE
 
 Is done in the same way as the unconditional JT-VAE (see file fast_molvae/README.md)
