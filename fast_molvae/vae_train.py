@@ -9,6 +9,9 @@ import sys
 import time
 from pathlib import Path
 
+source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(source))
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -17,10 +20,7 @@ import torch.optim.lr_scheduler as lr_scheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from fast_jtnn import MolTreeDataset
-
-source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-sys.path.insert(0, str(source))
+from fast_jtnn.datautils_prop import MolTreeDataset
 
 # Initialize logger
 _logger: logging.Logger = logging.getLogger(__name__)

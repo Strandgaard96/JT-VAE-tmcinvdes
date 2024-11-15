@@ -1,13 +1,10 @@
 import argparse
 import logging
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
-
-sys.path.append("../")
-
-import subprocess
 
 import torch
 import torch.nn as nn
