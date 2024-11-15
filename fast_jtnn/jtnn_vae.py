@@ -1,4 +1,5 @@
 import copy
+import math
 
 import rdkit.Chem as Chem
 import torch
@@ -6,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .chemutils import attach_mols, copy_edit_mol, enum_assemble, set_atommap
-from .datautils import tensorize
+from .datautils_prop import get_tensors
 from .jtmpn import JTMPN
 from .jtnn_dec import JTNNDecoder
 from .jtnn_enc import JTNNEncoder
@@ -42,6 +43,20 @@ class JTNNVAE(nn.Module):
         self.G_mean = nn.Linear(hidden_size, latent_size)
         self.G_var = nn.Linear(hidden_size, latent_size)
 
+    def param_norm(self):
+        return math.sqrt(sum([(p.norm().item() ** 2) for p in self.parameters()]))
+
+    def grad_norm(self):
+        return math.sqrt(
+            sum(
+                [
+                    (p.grad.norm().item() ** 2)
+                    for p in self.parameters()
+                    if p.grad is not None
+                ]
+            )
+        )
+
     def encode(self, jtenc_holder, mpn_holder):
         tree_vecs, tree_mess = self.jtnn(*jtenc_holder)
         mol_vecs = self.mpn(*mpn_holder)
@@ -49,7 +64,7 @@ class JTNNVAE(nn.Module):
 
     def encode_from_smiles(self, smiles_list):
         tree_batch = [MolTree(s) for s in smiles_list]
-        _, jtenc_holder, mpn_holder = tensorize(tree_batch, self.vocab, assm=False)
+        jtenc_holder, mpn_holder, _ = get_tensors(tree_batch)
         tree_vecs, _, mol_vecs = self.encode(jtenc_holder, mpn_holder)
         return torch.cat([tree_vecs, mol_vecs], dim=-1)
 
@@ -94,13 +109,17 @@ class JTNNVAE(nn.Module):
             x_batch, x_jtmpn_holder, z_mol_vecs, x_tree_mess
         )
 
-        return (
-            word_loss + topo_loss + assm_loss + beta * kl_div,
-            kl_div.item(),
-            word_acc,
-            topo_acc,
-            assm_acc,
-        )
+        # Standard loss
+        standard_loss = word_loss + topo_loss + assm_loss + beta * kl_div
+        # Standard log
+        log_metrics = {
+            "kl_div": kl_div.item(),
+            "word_acc": word_acc * 100,
+            "topo_acc": topo_acc * 100,
+            "assm_acc": assm_acc * 100,
+        }
+
+        return standard_loss, log_metrics
 
     def assm(self, mol_batch, jtmpn_holder, x_mol_vecs, x_tree_mess):
         jtmpn_holder, batch_idx = jtmpn_holder

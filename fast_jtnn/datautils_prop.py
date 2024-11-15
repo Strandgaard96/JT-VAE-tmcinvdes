@@ -1,182 +1,149 @@
-import itertools
-import os
-import pickle as pickle
-import random
+from pathlib import Path
 
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
+from tqdm import tqdm
 
 from fast_jtnn.jtmpn import JTMPN
 from fast_jtnn.jtnn_enc import JTNNEncoder
 from fast_jtnn.mpn import MPN
+from fast_jtnn.vocab import Vocab
+from fast_molopt.preprocess_prop import get_mol_trees, load_smiles_and_props_from_files
 
 
-class PairTreeFolder(object):
+class MolTreeDataset(Dataset):
+    "Class that processes data and supplies it to the JT-VAE during training"
+
     def __init__(
         self,
-        data_folder,
-        vocab,
+        smiles_path,
+        properties_path,
+        vocab_path,
         batch_size,
-        num_workers=4,
-        shuffle=True,
-        y_assm=True,
-        replicate=None,
+        cache_dir="cache/batches",
+        developer_mode=False,
     ):
-        self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
         self.batch_size = batch_size
-        self.vocab = vocab
-        self.num_workers = num_workers
-        self.y_assm = y_assm
-        self.shuffle = shuffle
 
-        if replicate is not None:  # expand is int
-            self.data_files = self.data_files * replicate
+        vocab = [x.strip("\r\n ") for x in open(vocab_path)]
+        self.vocab = Vocab(vocab)
 
-    def __iter__(self):
-        for fn in self.data_files:
-            fn = os.path.join(self.data_folder, fn)
-            with open(fn, "rb") as f:
-                data = pickle.load(f)
-
-            if self.shuffle:
-                random.shuffle(data)  # shuffle data before batch
-
-            batches = [
-                data[i : i + self.batch_size]
-                for i in range(0, len(data), self.batch_size)
-            ]
-            if len(batches[-1]) < self.batch_size:
-                batches.pop()
-
-            dataset = PairTreeDataset(batches, self.vocab, self.y_assm)
-            dataloader = DataLoader(
-                dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0]
-            )  # , num_workers=self.num_workers)
-
-            for b in dataloader:
-                yield b
-
-            del data, batches, dataset, dataloader
-
-
-class MolTreeFolder_prop(object):
-    def __init__(
-        self,
-        data_folder,
-        vocab,
-        batch_size,
-        num_workers=4,
-        shuffle=False,
-        assm=True,
-        replicate=None,
-        optimize=False,
-    ):
-        self.data_folder = data_folder
-        self.data_files = [fn for fn in os.listdir(data_folder)]
-        self.batch_size = batch_size
-        self.vocab = vocab
-        self.num_workers = num_workers
-        self.shuffle = shuffle
-        self.assm = assm
-        self.optimize = optimize
-
-        if replicate is not None:  # expand is int
-            self.data_files = self.data_files * replicate
-
-    def __iter__(self):
-        for fn in self.data_files:
-            fn = os.path.join(self.data_folder, fn)
-            with open(fn, "rb") as f:
-                data = pickle.load(f)
-
-            if self.shuffle:
-                random.shuffle(data)  # shuffle data before batch
-
-            data, prop_data = data
-            batches = [
-                data[i : i + self.batch_size]
-                for i in range(0, len(data), self.batch_size)
-            ]
-            batches_prop = [
-                prop_data[i : i + self.batch_size]
-                for i in range(0, len(prop_data), self.batch_size)
-            ]
-            # if len(batches[-1]) < self.batch_size:
-            #     print("WARNING: Batch size does not match the splits well enough.")
-            #     batches.pop()
-            #     batches_prop.pop()
-
-            dataset = MolTreeDataset_prop(
-                batches, batches_prop, self.vocab, self.assm, self.optimize
+        if properties_path:
+            print("Detected property file. Loading SMILES and properties")
+            # Load SMILES and properties data
+            self.smiles_list, self.properties_array = load_smiles_and_props_from_files(
+                smiles_path, properties_path, developer_mode
             )
-            dataloader = DataLoader(
-                dataset, batch_size=1, shuffle=False, collate_fn=lambda x: x[0]
-            )  # , num_workers=self.num_workers)
+            self.props = True
+        else:
+            self.props = False
+            print("Loading SMILES")
+            with open(smiles_path) as f:
+                smiles = [line.strip("\r\n ").split()[0] for line in f]
+            self.smiles_list = smiles
 
-            for b in dataloader:
-                yield b
+        # Check if cache exists; if not, create it
+        if not self.cache_dir.exists() or not list(self.cache_dir.glob("batch_*.pt")):
+            print("Cache not found. Creating batch cache...")
+            self.cache_batches()
 
-            del data, batches, dataset, dataloader
+        # Chcek if cache is complete
+        number_of_cached_files = len(list(self.cache_dir.glob("batch_*.pt")))
+        expected_number_of_files = len(self.smiles_list) // batch_size
 
+        if not number_of_cached_files != expected_number_of_files:
+            raise Exception(
+                "Corrupt cache. The number of batch files do not match the current dataset length and batch size. Please delete this directory and re-create the cached data."
+            )
 
-class PairTreeDataset(Dataset):
-    def __init__(self, data, vocab, y_assm):
-        self.data = data
-        self.vocab = vocab
-        self.y_assm = y_assm
+        # Load list of batch files
+        self.batch_files = sorted(self.cache_dir.glob("batch_*.pt"))
+
+    def cache_batches(self):
+        """Processes data in batches and saves each batch to a separate file in
+        cache_dir."""
+        num_samples = len(self.smiles_list)
+        num_batches = (
+            num_samples + self.batch_size - 1
+        ) // self.batch_size  # Calculate total number of batches
+        print("Caching: ", num_samples, num_batches)
+        print(num_batches, self.batch_size)
+
+        for batch_idx in tqdm(range(num_batches), desc="Caching batches", unit="batch"):
+            # Determine the range of indices for this batch
+            start_idx = batch_idx * self.batch_size
+            end_idx = min(start_idx + self.batch_size, num_samples)
+
+            mol_trees = get_mol_trees(self.smiles_list[start_idx:end_idx], njobs=6)
+            set_batch_nodeID(mol_trees, self.vocab)
+
+            if self.props:
+                property_tensors = torch.tensor(
+                    self.properties_array[start_idx:end_idx], dtype=torch.float32
+                )
+            else:
+                property_tensors = None
+
+            # Process mol_tree to generate required tensors
+            jtenc_holders, mpn_holders, jtmpn_data = get_tensors(mol_trees)
+            jtmpn_holders, batch_idx_tensor = jtmpn_data
+
+            # Save the entire batch to a single file
+            batch_data = {
+                "mol_trees": mol_trees,
+                "property_tensors": property_tensors,
+                "jtenc_holders": jtenc_holders,
+                "mpn_holders": mpn_holders,
+                "jtmpn_holders": jtmpn_holders,
+                "batch_idxs": batch_idx_tensor,
+            }
+            torch.save(batch_data, self.cache_dir / f"batch_{batch_idx}.pt")
+
+        print(f"Cached {num_batches} batches to {self.cache_dir}")
 
     def __len__(self):
-        return len(self.data)
+        return len(self.batch_files)
 
     def __getitem__(self, idx):
-        batch0, batch1 = list(zip(*self.data[idx]))
-        return tensorize_prop(batch0, self.vocab, assm=False), tensorize_prop(
-            batch1, self.vocab, assm=self.y_assm
-        )
+        # Load the entire batch from a single file
+        batch_data = torch.load(self.batch_files[idx])
+        if self.props:
+            return (
+                batch_data["mol_trees"],
+                batch_data["property_tensors"],
+                batch_data["jtenc_holders"],
+                batch_data["mpn_holders"],
+                (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
+            )
+        else:
+            return (
+                batch_data["mol_trees"],
+                batch_data["jtenc_holders"],
+                batch_data["mpn_holders"],
+                (batch_data["jtmpn_holders"], batch_data["batch_idxs"]),
+            )
 
 
-class MolTreeDataset_prop(Dataset):
-    def __init__(self, data, prop_data, vocab, assm=True, optimize=False):
-        self.data = data
-        self.prop_data = prop_data
-        self.vocab = vocab
-        self.assm = assm
-        self.optimize = optimize
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        return tensorize_prop(
-            self.data[idx],
-            self.prop_data[idx],
-            self.vocab,
-            assm=self.assm,
-            optimize=self.optimize,
-        )
+def set_batch_nodeID(mol_batch, vocab):
+    "Utility function that sets ids that are used within the JT-VAE."
+    tot = 0
+    for mol_tree in mol_batch:
+        for node in mol_tree.nodes:
+            node.idx = tot
+            node.wid = vocab.get_index(node.smiles)
+            tot += 1
 
 
-def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
-    set_batch_nodeID(tree_batch, vocab)
+def get_tensors(tree_batch, assm=True, optimize=False):
+    "This function performs extra featurization of the mol trees that is needed during training"
     smiles_batch = [tree.smiles for tree in tree_batch]
     jtenc_holder, mess_dict = JTNNEncoder.tensorize(tree_batch)
     jtenc_holder = jtenc_holder
     mpn_holder = MPN.tensorize(smiles_batch)
-
-    # TL debug, with https://stackoverflow.com/a/70323486 {
-    # print(prop_batch)
-    # print(type(prop_batch))
-    prop_batch = np.vstack(prop_batch).astype(np.float)
-    # print(prop_batch)
-    # print(type(prop_batch))
-    # torch.from_numpy(a)
-
-    prop_batch_tensor = torch.FloatTensor(prop_batch)
-
-    if assm is False:
-        return tree_batch, prop_batch_tensor, jtenc_holder, mpn_holder
 
     cands = []
     batch_idx = []
@@ -188,27 +155,11 @@ def tensorize_prop(tree_batch, prop_batch, vocab, assm=True, optimize=False):
             cands.extend([(cand, mol_tree.nodes, node) for cand in node.cands])
             batch_idx.extend([i] * len(node.cands))
 
-    # WARNING: THIS NEEDS TO BE COMMENTED OUT WHEN DOING LOCAL OPTIMIZATION.
-    # A NONE VALUE SHOULD BE RETURNED AS THIS IS NOT USED IN OPTIMIZATION ANYWAY
-    if optimize:
-        jtmpn_holder = None
-    else:
-        jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
+    jtmpn_holder = JTMPN.tensorize(cands, mess_dict)
     batch_idx = torch.LongTensor(batch_idx)
 
     return (
-        tree_batch,
-        prop_batch_tensor,
         jtenc_holder,
         mpn_holder,
         (jtmpn_holder, batch_idx),
     )
-
-
-def set_batch_nodeID(mol_batch, vocab):
-    tot = 0
-    for mol_tree in mol_batch:
-        for node in mol_tree.nodes:
-            node.idx = tot
-            node.wid = vocab.get_index(node.smiles)
-            tot += 1

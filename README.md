@@ -15,8 +15,10 @@ The tree decomposition will give kekulization errors with newer versions of RDKi
 - `fast_molvae/` contains codes for unconditional JT-VAE training. Please refer to `fast_molvae/README.md` for details.
 - `fast_jtnn/` contains codes for model and data implementation.
 - `fast_molopt/` contains codes for training a conditional JT-VAE and for performing conditional optimization with a trained model.
-- `data/` conatains various ligand training data.
+- `data/` contains various ligand training data.
 
 #### FastJTNNpy3
 
 The code is based on a fork of [FastJTNNpy3](https://github.com/Bibyutatsu/FastJTNNpy3).
+
+- `fast_jtnn/` contains codes for model implementation.

@@ -1,9 +1,0 @@
-,tm_smiles,smiles,new_smiles,homo-lumo,Ir-cm5,current_type,minimize,region
-10,CC1OC(N)C(=O)[C]1->[Ir](<-[C]1C(=O)C(N)OC1C)(<-[C]1C(=O)C(N)OC1C)<-[C]1C(=O)C(N)OC1C,[Be]=[C]1C(=O)C(N)OC1C,[Be]=C1OC(N)C(=O)C1C,0.08949,0.5118418257207131,first,False,max_charge
-841,Oc1cccc(Cn2cn(->[Ir](<-n3cc(Cl)n(Cc4cccc(O)c4)c3)(<-n3cc(Cl)n(Cc4cccc(O)c4)c3)<-n3cc(Cl)n(Cc4cccc(O)c4)c3)cc2Cl)c1,[Li]<-n1cc(Cl)n(Cc2cccc(O)c2)c1,[Li]<-n1cc(Cl)n(-c2cnc(Cl)nc2)c1,0.140502,0.2402385131336885,first,True,quad
-704,C1=CC2=CC=CC(=O->[Ir](<-O=C3C=CC=C4C=CC=CC43)(<-O=C3C=CC=C4C=CC=CC43)<-O=C3C=CC=C4C=CC=CC43)C2C=C1,[Li]<-O=C1C=CC=C2C=CC=CC21,[Li]<-O=C1C=Cc2ccccc2C1,0.0733749999999999,0.2419342963115685,second,False,min_gap
-85,N#Cc1ccc(CC#N->[Ir](<-N#CCc2ccc(C#N)cc2)(<-N#CCc2ccc(C#N)cc2)<-N#CCc2ccc(C#N)cc2)cc1,[Li]<-N#CCc1ccc(C#N)cc1,[Li]<-NCCc1ccc(C#N)cc1,0.148161,0.4955727558974567,second,True,max_charge
-632,O=[N+]([O-])c1ccc(-n2ccn(->[Ir](<-n3ccn(-c4ccc([N+](=O)[O-])cc4[N+](=O)[O-])c3)(<-n3ccn(-c4ccc([N+](=O)[O-])cc4[N+](=O)[O-])c3)<-n3ccn(-c4ccc([N+](=O)[O-])cc4[N+](=O)[O-])c3)c2)c([N+](=O)[O-])c1,[Li]<-n1ccn(-c2ccc([N+](=O)[O-])cc2[N+](=O)[O-])c1,[Li]<-N#Cc1cc([N+](=O)[O-])ccc1C(F)(F)F,0.060596,0.2677208175616767,both,False,min_gap
-353,CN1C=C(N)N(c2ccccc2)[C]1->[Ir](<-[C]1N(C)C=C(N)N1c1ccccc1)(<-[C]1N(C)C=C(N)N1c1ccccc1)<-[C]1N(C)C=C(N)N1c1ccccc1,[Be]=[C]1N(C)C=C(N)N1c1ccccc1,[Li]<-S=c1[nH]c(N)nn1-c1ccccc1,0.129233,-0.0210817372462438,both,True,min_charge
-1526,Clc1ccccc1Cn1ccn(->[Ir](<-n2ccn(Cc3ccccc3Cl)c2)(<-n2ccn(Cc3ccccc3Cl)c2)<-n2ccn(Cc3ccccc3Cl)c2)c1,[Li]<-n1ccn(Cc2ccccc2Cl)c1,[Be]=C1N(CCCl)C=CN1c1ccccc1,0.124742,0.2402922420969167,first_second,False,quad
-397,Cc1ccc(-n2ccn(C(C)C)c2=S->[Ir](<-S=c2n(-c3ccc(C)c(C)c3)ccn2C(C)C)(<-S=c2n(-c3ccc(C)c(C)c3)ccn2C(C)C)<-S=c2n(-c3ccc(C)c(C)c3)ccn2C(C)C)cc1C,[Li]<-S=c1n(-c2ccc(C)c(C)c2)ccn1C(C)C,[Li]<-n1ccn(-c2ccc([N+](=O)[O-])cc2C)c1,0.121618,-0.0020781364013795,first_second,True,min_charge

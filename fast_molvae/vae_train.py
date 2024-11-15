@@ -2,54 +2,83 @@ import sys
 
 sys.path.append("../")
 import argparse
-import math
+import logging
 import os
-import pickle as pickle
+import subprocess
 import sys
+import time
 from pathlib import Path
+
+source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(source))
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-source = Path(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-sys.path.insert(0, str(source))
-from fast_jtnn import *
+from fast_jtnn.datautils_prop import MolTreeDataset
+
+# Initialize logger
+_logger: logging.Logger = logging.getLogger(__name__)
+
+from fast_jtnn import JTNNVAE, Vocab
+
+
+def get_git_revision_short_hash() -> str:
+    """get the git hash of current commit if git repo."""
+    return (
+        subprocess.check_output(["git", "rev-parse", "--short", "HEAD"])
+        .decode("ascii")
+        .strip()
+    )
 
 
 def main_vae_train(
-    train,
-    vocab,
-    save_dir,
-    load_epoch=0,
-    hidden_size=450,
-    batch_size=32,
-    latent_size=56,
-    depthT=20,
-    depthG=3,
-    lr=1e-3,
-    clip_norm=50.0,
-    beta=0.0,
-    step_beta=0.002,
-    max_beta=1.0,
-    warmup=1000,
-    epoch=100,
-    anneal_rate=0.9,
-    anneal_iter=1000,
-    kl_anneal_iter=500,
-    print_iter=50,
-    save_iter=1000,
+    args,
 ):
-    vocab = [x.strip("\r\n ") for x in open(vocab)]
+    output_dir = Path(f"train_{time.strftime('%Y%m%d-%H%M%S')}")
+    output_dir.mkdir(exist_ok=True)
+
+    # Write commandline args to file
+    with open(output_dir / "opts.txt", "w") as file:
+        file.write(f"{vars(args)}\n")
+
+    # Write the current git commit to the log
+    _logger.info(f"Git commit tag: {get_git_revision_short_hash()}\n")
+
+    #  Load the vocab
+    with open(args.vocab_path) as f:
+        vocab = f.read().splitlines()
+    # vocab = [x.strip("\r\n ") for x in open(args.vocab)]
     vocab = Vocab(vocab)
 
+    # Setup logger
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)-5.5s]  %(message)s",
+        handlers=[
+            logging.FileHandler(output_dir / "printlog.txt", mode="w"),
+            logging.StreamHandler(),  # For debugging. Can be removed on remote
+        ],
+    )
+
+    # Unpack beta
+    beta = args.beta
+
     model = JTNNVAE(
-        vocab, int(hidden_size), int(latent_size), int(depthT), int(depthG)
+        vocab,
+        args.hidden_size,
+        args.latent_size,
+        args.depthT,
+        args.depthG,
     ).cuda()
-    print(model)
+    if args.load_previous_model:
+        model.load_state_dict(torch.load(args.model_path))
+    _logger.info(model)
 
     for param in model.parameters():
         if param.dim() == 1:
@@ -57,146 +86,120 @@ def main_vae_train(
         else:
             nn.init.xavier_normal_(param)
 
-    if os.path.isdir(save_dir) is False:
-        os.makedirs(save_dir)
-
-    if load_epoch > 0:
-        model.load_state_dict(torch.load(save_dir + "/model.epoch-" + str(load_epoch)))
-
-    print(
+    _logger.info(
         (
             "Model #Params: %dK"
             % (sum([x.nelement() for x in model.parameters()]) / 1000,)
         )
     )
 
-    optimizer = optim.Adam(model.parameters(), lr=lr)
-    scheduler = lr_scheduler.ExponentialLR(optimizer, anneal_rate)
+    optimizer = optim.Adam(model.parameters(), lr=args.lr)
+    scheduler = lr_scheduler.ExponentialLR(optimizer, args.gamma)
 
-    def param_norm(m):
-        return math.sqrt(sum([(p.norm().item() ** 2) for p in m.parameters()]))
+    # Initialize the dataset
+    dataset = MolTreeDataset(
+        smiles_path=args.dataset_path,
+        properties_path=None,
+        vocab_path=args.vocab_path,
+        batch_size=args.batch_size,
+        cache_dir=args.dataset_path.parent / "cache/batches",
+    )
 
-    def grad_norm(m):
-        return math.sqrt(
-            sum(
-                [
-                    (p.grad.norm().item() ** 2)
-                    for p in m.parameters()
-                    if p.grad is not None
-                ]
-            )
-        )
+    # DataLoader with batch_size=1, since each iteration yields a full batch
+    loader = DataLoader(
+        dataset,
+        batch_size=1,  # Each item is already a batch
+        shuffle=False,
+        collate_fn=lambda x: x[0],  # Unwrap the single-item list returned by DataLoader
+    )
 
-    total_step = load_epoch
-    meters = np.zeros(4)
-
-    print("Before epoch")
-    for epoch in tqdm(list(range(epoch))):
-        print(f"Epoch: {epoch}")
-        loader = MolTreeFolder(train, vocab, batch_size)  # , num_workers=4)
+    total_step = 0
+    for epoch in tqdm(
+        range(args.epoch), position=0, leave=True, desc="Training epochs"
+    ):
         for batch in loader:
             total_step += 1
-            try:
-                model.zero_grad()
-                loss, kl_div, wacc, tacc, sacc = model(batch, beta)
-                loss.backward()
-                nn.utils.clip_grad_norm_(model.parameters(), clip_norm)
-                optimizer.step()
-            except Exception as e:
-                print(f"Batch {total_step} failed")
-                print(e)
-                continue
+            model.zero_grad()
+            loss, log_metrics = model(batch, beta)
+            loss.backward()
+            nn.utils.clip_grad_norm_(model.parameters(), args.clip_norm)
+            optimizer.step()
 
-            meters = meters + np.array([kl_div, wacc * 100, tacc * 100, sacc * 100])
-
-            if total_step % print_iter == 0:
-                meters /= print_iter
-                print(
-                    (
-                        "[%d] Loss: %.3f,Beta: %.3f,KL: %.2f, Word: %.2f, Topo: %.2f, Assm: %.2f, PNorm: %.2f, GNorm: %.2f"
-                        % (
-                            total_step,
-                            loss.item(),
-                            beta,
-                            meters[0],
-                            meters[1],
-                            meters[2],
-                            meters[3],
-                            param_norm(model),
-                            grad_norm(model),
-                        )
-                    )
+            # Log the current metrics
+            if total_step % args.print_iter == 0:
+                log_list = (
+                    [f"Loss: {loss:.2f}", f" Beta: {beta:.5f}"]
+                    + [f" {k}: {v:.3f}" for k, v in log_metrics.items()]
+                    + [
+                        f"PNorm: {model.param_norm():.3f}",
+                        f"GNorm: {model.grad_norm():.3f}",
+                    ]
                 )
-                print(f"Loss: {loss.item()}")
-                sys.stdout.flush()
-                meters *= 0
+                log_string = ",".join(log_list)
+                _logger.info(log_string)
 
-            if total_step % save_iter == 0:
-                torch.save(
-                    model.state_dict(), save_dir + "/model.iter-" + str(total_step)
-                )
+            if epoch % args.save_iter == 0:
+                torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
 
-            if total_step % anneal_iter == 0:
+            if epoch % args.anneal_iter == 0:
                 scheduler.step()
-                print(("learning rate: %.6f" % scheduler.get_lr()[0]))
+                _logger.info(("learning rate: %.6f" % scheduler.get_last_lr()[0]))
 
-            if total_step % kl_anneal_iter == 0 and total_step >= warmup:
-                beta = min(max_beta, beta + step_beta)
-    #         torch.save(model.state_dict(), save_dir + "/model.epoch-" + str(epoch))
-    torch.save(model.state_dict(), save_dir + "/model.epoch-" + str(total_step))
+            # Update the beta value
+            if epoch % args.kl_anneal_iter == 0 and epoch >= args.warmup:
+                beta = min(args.max_beta, beta + args.step_beta)
+                _logger.info(f"Warmup phase done. Starting annealing, new beta: {beta}")
+
+    torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
     return model
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--train", required=True)
-    parser.add_argument("--vocab", required=True)
-    parser.add_argument("--save_dir", required=True)
-    parser.add_argument("--load_epoch", type=int, default=0)
 
+    parser.add_argument("--dataset_path", required=True, type=Path)
+    parser.add_argument("--vocab_path", required=True)
+    parser.add_argument("--load_previous_model", action="store_true")
+    parser.add_argument("--developer_mode", action="store_true")
+    parser.add_argument("--model_path", required=False, type=Path)
+    parser.add_argument("--load_epoch", type=int, default=0)
+    parser.add_argument(
+        "--train_mode",
+        nargs="*",
+        default=[],
+        choices=["denticity", "isomer"],
+        help="Selects which extra property terms to include in the training, when using the argument each extra term should be separated by a space",
+    )
+
+    # These should not be touched
     parser.add_argument("--hidden_size", type=int, default=450)
-    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--latent_size", type=int, default=56)
     parser.add_argument("--depthT", type=int, default=20)
     parser.add_argument("--depthG", type=int, default=3)
-
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--clip_norm", type=float, default=50.0)
-    parser.add_argument("--beta", type=float, default=0.0)
+
+    # The following values should be tailored to each new dataset
+    parser.add_argument("--beta", type=float, default=0.006)
     parser.add_argument("--step_beta", type=float, default=0.002)
     parser.add_argument("--max_beta", type=float, default=1.0)
-    parser.add_argument("--warmup", type=int, default=500)
+    parser.add_argument("--warmup", type=int, default=2)
+    parser.add_argument(
+        "--gamma", type=float, default=0.9, help="Pytorch parameter for ExponentialLR"
+    )
+    parser.add_argument("--anneal_iter", type=int, default=5)
+    parser.add_argument("--kl_anneal_iter", type=int, default=15)
 
-    parser.add_argument("--epoch", type=int, default=100)
-    parser.add_argument("--anneal_rate", type=float, default=0.9)
-    parser.add_argument("--anneal_iter", type=int, default=1000)
-    parser.add_argument("--kl_anneal_iter", type=int, default=300)
-    parser.add_argument("--print_iter", type=int, default=50)
-    parser.add_argument("--save_iter", type=int, default=1000)
+    parser.add_argument("--epoch", type=int, default=150)
+    parser.add_argument("--print_iter", type=int, default=1)
+    parser.add_argument(
+        "--save_iter", type=int, default=50, help="How often to save the model"
+    )
 
     args = parser.parse_args()
-    print(args)
+    _logger.info(args)
 
     main_vae_train(
-        args.train,
-        args.vocab,
-        args.save_dir,
-        args.load_epoch,
-        args.hidden_size,
-        args.batch_size,
-        args.latent_size,
-        args.depthT,
-        args.depthG,
-        args.lr,
-        args.clip_norm,
-        args.beta,
-        args.step_beta,
-        args.max_beta,
-        args.warmup,
-        args.epoch,
-        args.anneal_rate,
-        args.anneal_iter,
-        args.kl_anneal_iter,
-        args.print_iter,
-        args.save_iter,
+        args=args,
     )

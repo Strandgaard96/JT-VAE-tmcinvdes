@@ -2,9 +2,7 @@
 
 ## Important notes
 
-The original property JT-VAE was not compatible with the rest of the code. I rewrote it to follow the datahandling and the updated "fast" code.
-It was not clear to me how the processing of SMILES to moltrees was refactored.
-Instead of rewriting the existing datautils.py i created a separate file datautils_prop.py. In this way i avoided dealing with one script having to handle both the data for the regular JT-VAE without properties as training input and the data for JT_prop_vae where properties were given as input as well.
+The property JT-VAE from the original JT-VAE repo was not compatible with the rest of the code. I adapted it to work with the new data processing.
 
 ## Training of conditional JT-VAE
 
