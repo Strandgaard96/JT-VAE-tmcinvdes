@@ -37,7 +37,6 @@ def main_vae_train(
 ):
     output_dir = Path(f"train_{time.strftime('%Y%m%d-%H%M%S')}")
     output_dir.mkdir(exist_ok=True)
-    args.save_dir.mkdir(exist_ok=True)
 
     # Write commandline args to file
     with open(output_dir / "opts.txt", "w") as file:
@@ -56,7 +55,7 @@ def main_vae_train(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)-5.5s]  %(message)s",
         handlers=[
-            logging.FileHandler(os.path.join(output_dir, "printlog.txt"), mode="w"),
+            logging.FileHandler(output_dir / "printlog.txt", mode="w"),
             logging.StreamHandler(),  # For debugging. Can be removed on remote
         ],
     )
@@ -144,7 +143,7 @@ def main_vae_train(
             # Update the beta value
             if epoch % args.kl_anneal_iter == 0 and epoch >= args.warmup:
                 beta = min(args.max_beta, beta + args.step_beta)
-                _logger.ingo(f"Warmup phase done. Starting annealing, new beta: {beta}")
+                _logger.info(f"Warmup phase done. Starting annealing, new beta: {beta}")
 
     torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
     return model
@@ -152,10 +151,10 @@ def main_vae_train(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--dataset_path", required=True, type=Path)
     parser.add_argument("--dataset_prop", required=True, type=Path)
     parser.add_argument("--vocab_path", required=True)
-    parser.add_argument("--save_dir", required=True, type=Path)
     parser.add_argument("--load_previous_model", action="store_true")
     parser.add_argument("--developer_mode", action="store_true")
     parser.add_argument("--model_path", required=False, type=Path)
