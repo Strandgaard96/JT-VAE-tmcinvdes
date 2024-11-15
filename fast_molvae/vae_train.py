@@ -144,7 +144,7 @@ def main_vae_train(
 
             if epoch % args.anneal_iter == 0:
                 scheduler.step()
-                _logger.info(("learning rate: %.6f" % scheduler.get_latest_lr()[0]))
+                _logger.info(("learning rate: %.6f" % scheduler.get_last_lr()[0]))
 
             # Update the beta value
             if epoch % args.kl_anneal_iter == 0 and epoch >= args.warmup:
