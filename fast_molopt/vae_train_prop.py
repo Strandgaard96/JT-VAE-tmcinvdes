@@ -167,12 +167,13 @@ if __name__ == "__main__":
         help="Selects which extra property terms to include in the training, when using the argument each extra term should be separated by a space",
     )
 
-    # These should not be touched
+    # These values relate to the JT-VAE architecture
     parser.add_argument("--hidden_size", type=int, default=450)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--latent_size", type=int, default=56)
     parser.add_argument("--depthT", type=int, default=20)
     parser.add_argument("--depthG", type=int, default=3)
+
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--clip_norm", type=float, default=50.0)
 

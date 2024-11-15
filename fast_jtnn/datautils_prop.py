@@ -33,7 +33,7 @@ class MolTreeDataset(Dataset):
         self.vocab = Vocab(vocab)
 
         if properties_path:
-            print("Loading SMILES and properties")
+            print("Detected property file. Loading SMILES and properties")
             # Load SMILES and properties data
             self.smiles_list, self.properties_array = load_smiles_and_props_from_files(
                 smiles_path, properties_path, developer_mode
