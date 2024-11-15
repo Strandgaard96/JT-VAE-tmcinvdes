@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .chemutils import attach_mols, copy_edit_mol, enum_assemble, set_atommap
-from .datautils import tensorize
+from .datautils_prop import get_tensors
 from .jtmpn import JTMPN
 from .jtnn_dec import JTNNDecoder
 from .jtnn_enc import JTNNEncoder
@@ -64,7 +64,7 @@ class JTNNVAE(nn.Module):
 
     def encode_from_smiles(self, smiles_list):
         tree_batch = [MolTree(s) for s in smiles_list]
-        _, jtenc_holder, mpn_holder = tensorize(tree_batch, self.vocab, assm=False)
+        jtenc_holder, mpn_holder, _ = get_tensors(tree_batch)
         tree_vecs, _, mol_vecs = self.encode(jtenc_holder, mpn_holder)
         return torch.cat([tree_vecs, mol_vecs], dim=-1)
 

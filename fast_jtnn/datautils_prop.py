@@ -13,6 +13,8 @@ from fast_molopt.preprocess_prop import get_mol_trees, load_smiles_and_props_fro
 
 
 class MolTreeDataset(Dataset):
+    "Class that processes data and supplies it to the JT-VAE during training"
+
     def __init__(
         self,
         smiles_path,
@@ -49,6 +51,15 @@ class MolTreeDataset(Dataset):
             print("Cache not found. Creating batch cache...")
             self.cache_batches()
 
+        # Chcek if cache is complete
+        number_of_cached_files = len(list(self.cache_dir.glob("batch_*.pt")))
+        expected_number_of_files = len(self.smiles_list) // batch_size
+
+        if not number_of_cached_files != expected_number_of_files:
+            raise Exception(
+                "Corrupt cache. The number of batch files do not match the current dataset length and batch size. Please delete this directory and re-create the cached data."
+            )
+
         # Load list of batch files
         self.batch_files = sorted(self.cache_dir.glob("batch_*.pt"))
 
@@ -59,6 +70,8 @@ class MolTreeDataset(Dataset):
         num_batches = (
             num_samples + self.batch_size - 1
         ) // self.batch_size  # Calculate total number of batches
+        print("Caching: ", num_samples, num_batches)
+        print(num_batches, self.batch_size)
 
         for batch_idx in tqdm(range(num_batches), desc="Caching batches", unit="batch"):
             # Determine the range of indices for this batch
@@ -116,6 +129,7 @@ class MolTreeDataset(Dataset):
 
 
 def set_batch_nodeID(mol_batch, vocab):
+    "Utility function that sets ids that are used within the JT-VAE."
     tot = 0
     for mol_tree in mol_batch:
         for node in mol_tree.nodes:

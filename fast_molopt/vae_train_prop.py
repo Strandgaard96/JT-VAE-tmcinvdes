@@ -38,14 +38,21 @@ def get_git_revision_short_hash() -> str:
 def main_vae_train(
     args,
 ):
+    output_dir = Path(f"train_{time.strftime('%Y%m%d-%H%M%S')}")
+    output_dir.mkdir(exist_ok=True)
+    args.save_dir.mkdir(exist_ok=True)
+
+    # Write commandline args to file
+    with open(output_dir / "opts.txt", "w") as file:
+        file.write(f"{vars(args)}\n")
+
+    # Write the current git commit to the log
+    _logger.info(f"Git commit tag: {get_git_revision_short_hash()}\n")
+
     #  Load the vocab
     with open(args.vocab_path) as f:
         vocab = f.read().splitlines()
     vocab = Vocab(vocab)
-
-    output_dir = Path(f"train_{time.strftime('%Y%m%d-%H%M%S')}")
-    output_dir.mkdir(exist_ok=True)
-    args.save_dir.mkdir(exist_ok=True)
 
     # Setup logger
     logging.basicConfig(
@@ -85,15 +92,8 @@ def main_vae_train(
         )
     )
 
-    # Write commandline args to file
-    with open(output_dir / "opts.txt", "w") as file:
-        file.write(f"{vars(args)}\n")
-
-    # Write the current git commit to the log
-    _logger.info(f"Git commit tag: {get_git_revision_short_hash()}\n")
-
     optimizer = optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = lr_scheduler.ExponentialLR(optimizer, args.anneal_rate)
+    scheduler = lr_scheduler.ExponentialLR(optimizer, args.gamma)
 
     # Initialize the dataset
     dataset = MolTreeDataset(
@@ -101,7 +101,7 @@ def main_vae_train(
         properties_path=args.dataset_prop,
         vocab_path=args.vocab_path,
         batch_size=args.batch_size,
-        cache_dir="cache/batches",
+        cache_dir=args.dataset_path.parent / "cache/batches",
     )
 
     # DataLoader with batch_size=1, since each iteration yields a full batch
@@ -142,12 +142,12 @@ def main_vae_train(
 
             if epoch % args.anneal_iter == 0:
                 scheduler.step()
-                _logger.info(("learning rate: %.6f" % scheduler.get_lr()[0]))
+                _logger.info(("learning rate: %.6f" % scheduler.get_latest_lr()[0]))
 
             # Update the beta value
             if epoch % args.kl_anneal_iter == 0 and epoch >= args.warmup:
                 beta = min(args.max_beta, beta + args.step_beta)
-                _logger.ingo(f"Warmup phase done. Strating annealing, new beta: {beta}")
+                _logger.ingo(f"Warmup phase done. Starting annealing, new beta: {beta}")
 
     torch.save(model.state_dict(), output_dir / f"model.epoch-{epoch}")
     return model
@@ -185,7 +185,9 @@ if __name__ == "__main__":
     parser.add_argument("--step_beta", type=float, default=0.002)
     parser.add_argument("--max_beta", type=float, default=1.0)
     parser.add_argument("--warmup", type=int, default=2)
-    parser.add_argument("--anneal_rate", type=float, default=0.9)
+    parser.add_argument(
+        "--gamma", type=float, default=0.9, help="Pytorch parameter for ExponentialLR"
+    )
     parser.add_argument("--anneal_iter", type=int, default=5)
     parser.add_argument("--kl_anneal_iter", type=int, default=15)
 
