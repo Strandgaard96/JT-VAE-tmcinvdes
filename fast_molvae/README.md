@@ -1,6 +1,6 @@
-# Accelerated Training of Junction Tree VAE
+# Unconditinal JT-VAE training
 
-The training sets for the model can be found at : [Training sets](https://github.com/uiocompcat/tmcinvdes/tree/main/datasets/01_tmQMg-L-training_sets)
+The training sets for the models are found here : [tmcinvdes repo](https://github.com/uiocompcat/tmcinvdes/tree/main/datasets/01_tmQMg-L-training_sets)
 
 To train a model run the following scripts sequentially in the conda environment given in environment.yml
 Replace train.txt with the path to the training set you want to use.

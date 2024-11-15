@@ -1,4 +1,4 @@
-# Constrained Molecule Optimization
+# Conditional JT-VAE training
 
 ## Important notes
 
@@ -17,5 +17,5 @@ It also needs a trained model and vocabulary.
 An example of running the optimization is:
 
 ```
-python -u fast_molopt/optimize.py input_dir_path data/example_prompt_ligands.csv --vocab_path vocab.txt --cutoff 0.2 --lr 1.5 --model_path $model
+python -u fast_molopt/optimize.py input_dir_path data/example_prompt_ligands.csv --vocab_path vocab.txt --cutoff 0.2 --model_path $model
 ```
