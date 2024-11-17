@@ -158,7 +158,6 @@ if __name__ == "__main__":
     parser.add_argument("--load_previous_model", action="store_true")
     parser.add_argument("--developer_mode", action="store_true")
     parser.add_argument("--model_path", required=False, type=Path)
-    parser.add_argument("--load_epoch", type=int, default=0)
     parser.add_argument(
         "--train_mode",
         nargs="*",
