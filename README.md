@@ -1,6 +1,8 @@
 # JT-VAE for the Dual-Objective Inverse Design of Metal Complexes
 
-This repo contains the modified [JT-VAE](https://github.com/Bibyutatsu/FastJTNNpy3) code for the publication ["Deep Generative Model for the Dual-Objective Inverse Design of Metal Complexes."](https://doi.org/10.26434/chemrxiv-2024-mzs7b)
+This repo contains the modified [JT-VAE](https://github.com/Bibyutatsu/FastJTNNpy3) code for the publication ["A Deep Generative Model for the Inverse
+Design of Transition Metal Ligands and Complexes"](https://pubs.acs.org/doi/10.1021/jacsau.5c00242)
+
 
 ## Requirements
 
